@@ -1,0 +1,92 @@
+rules_version = '2';
+
+// Access model:
+//  - Admin (hardcoded UID below) approves instructor accounts.
+//  - Approved instructors own sessions and everything beneath them.
+//  - Students sign in anonymously and act on exactly one document whose id is
+//    the SHA-256 hash of their login code. Possession of the code is the
+//    capability; 'list' is never granted, so codes cannot be enumerated.
+//  - Student responses are client-side encrypted, so even readable documents
+//    expose no survey content.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // *** Replace with your own Firebase Auth UID after first sign-in. ***
+    function adminUid() {
+      return "REPLACE_WITH_YOUR_ADMIN_UID";
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && request.auth.uid == adminUid();
+    }
+
+    function isApprovedInstructor() {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.approved == true;
+    }
+
+    function ownsSession(sid) {
+      return isSignedIn()
+        && get(/databases/$(database)/documents/sessions/$(sid)).data.ownerUid == request.auth.uid;
+    }
+
+    function sessionIsOpen(sid) {
+      return get(/databases/$(database)/documents/sessions/$(sid)).data.status == "open";
+    }
+
+    match /users/{uid} {
+      // Self-registration always starts unapproved.
+      allow create: if isSignedIn()
+        && request.auth.uid == uid
+        && request.resource.data.approved == false;
+      allow get: if isAdmin() || (isSignedIn() && request.auth.uid == uid);
+      allow list: if isAdmin();
+      // Only the admin can change the approved flag; users may edit their name.
+      allow update: if isAdmin()
+        || (isSignedIn()
+            && request.auth.uid == uid
+            && request.resource.data.approved == resource.data.approved);
+      allow delete: if isAdmin();
+    }
+
+    match /sessions/{sid} {
+      allow create: if isApprovedInstructor()
+        && request.resource.data.ownerUid == request.auth.uid;
+      allow read, update, delete: if isSignedIn()
+        && resource.data.ownerUid == request.auth.uid;
+
+      // Survey config students need: questions, project blurbs, public key.
+      match /public/{docId} {
+        allow get: if isSignedIn();
+        allow write: if ownsSession(sid);
+      }
+
+      match /projects/{pid} {
+        allow read, write: if ownsSession(sid);
+      }
+
+      match /students/{codeHash} {
+        // get-not-list: a valid code (hence hash) is required to touch a doc.
+        allow get: if isSignedIn();
+        allow list, create, delete: if ownsSession(sid);
+        // Students may only write their encrypted response while the survey is
+        // open, and may not touch codeIndex.
+        allow update: if ownsSession(sid)
+          || (isSignedIn()
+              && sessionIsOpen(sid)
+              && request.resource.data.diff(resource.data).affectedKeys()
+                   .hasOnly(["response", "submittedAt"]));
+      }
+
+      match /results/{docId} {
+        allow read, write: if ownsSession(sid);
+      }
+    }
+  }
+}

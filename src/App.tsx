@@ -1,0 +1,128 @@
+import { Link, Route, Routes } from "react-router-dom";
+import { signOut } from "firebase/auth";
+import { auth } from "./lib/firebase";
+import { useAuth } from "./features/auth/AuthContext";
+import { RequireInstructor, SignInPage, SignUpPage } from "./features/auth/AuthPages";
+import { AdminPage } from "./features/admin/AdminPage";
+import { DashboardPage } from "./features/sessions/DashboardPage";
+import { SessionPage } from "./features/sessions/SessionPage";
+import { StudentPage } from "./features/student/StudentPage";
+import { Button, Card } from "./components/ui";
+
+function Header() {
+  const { user, profile, isAdmin } = useAuth();
+  const instructor = user && !user.isAnonymous;
+  return (
+    <header className="border-b border-slate-200 bg-white">
+      <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-3">
+        <Link to="/" className="text-lg font-bold text-indigo-700">
+          TeamForge
+        </Link>
+        <nav className="flex items-center gap-3 text-sm">
+          {instructor ? (
+            <>
+              <Link to="/dashboard" className="text-slate-600 hover:text-indigo-700">
+                My sessions
+              </Link>
+              {isAdmin && (
+                <Link to="/admin" className="text-slate-600 hover:text-indigo-700">
+                  Admin
+                </Link>
+              )}
+              <span className="hidden text-slate-400 sm:inline">{profile?.name ?? user.email}</span>
+              <Button variant="secondary" onClick={() => signOut(auth)}>
+                Sign out
+              </Button>
+            </>
+          ) : (
+            <>
+              <Link to="/signin" className="text-slate-600 hover:text-indigo-700">
+                Instructor sign-in
+              </Link>
+              <Link to="/signup">
+                <Button>Register</Button>
+              </Link>
+            </>
+          )}
+        </nav>
+      </div>
+    </header>
+  );
+}
+
+function LandingPage() {
+  return (
+    <div className="mx-auto max-w-3xl space-y-6 px-4 py-12">
+      <div className="text-center">
+        <h1 className="text-3xl font-bold">TeamForge</h1>
+        <p className="mt-2 text-lg text-slate-600">
+          Privacy-preserving student team allocation: build a survey, collect anonymous responses, and let an
+          optimizer form balanced teams.
+        </p>
+      </div>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Card>
+          <h2 className="mb-2 font-semibold">Instructors</h2>
+          <p className="mb-3 text-sm text-slate-600">
+            Create a session, describe projects, design the survey, define constraints, and run the optimizer — all
+            from your browser.
+          </p>
+          <Link to="/signup">
+            <Button>Register as instructor</Button>
+          </Link>
+        </Card>
+        <Card>
+          <h2 className="mb-2 font-semibold">Students</h2>
+          <p className="mb-3 text-sm text-slate-600">
+            Got a survey link and login code from your instructor? Open the link and enter your code — no account, no
+            name, no email needed.
+          </p>
+        </Card>
+      </div>
+      <Card className="bg-indigo-50">
+        <h2 className="mb-2 font-semibold">How your privacy is protected</h2>
+        <ul className="list-disc space-y-1 pl-5 text-sm text-slate-700">
+          <li>Students are identified only by random login codes — the platform never learns names or emails.</li>
+          <li>
+            Survey answers are <strong>encrypted in your browser</strong> before upload. Only the instructor holds the
+            key; not even the database administrator can read responses.
+          </li>
+          <li>Team optimization runs entirely inside the instructor's browser — data never leaves it decrypted.</li>
+          <li>Instructors can permanently erase all student data of a session at any time, with one click.</li>
+          <li>No analytics, no tracking, no third-party scripts.</li>
+        </ul>
+      </Card>
+    </div>
+  );
+}
+
+export default function App() {
+  return (
+    <div className="min-h-screen">
+      <Header />
+      <Routes>
+        <Route path="/" element={<LandingPage />} />
+        <Route path="/signup" element={<SignUpPage />} />
+        <Route path="/signin" element={<SignInPage />} />
+        <Route path="/admin" element={<AdminPage />} />
+        <Route
+          path="/dashboard"
+          element={
+            <RequireInstructor>
+              <DashboardPage />
+            </RequireInstructor>
+          }
+        />
+        <Route
+          path="/session/:sid/*"
+          element={
+            <RequireInstructor>
+              <SessionPage />
+            </RequireInstructor>
+          }
+        />
+        <Route path="/s/:sid" element={<StudentPage />} />
+      </Routes>
+    </div>
+  );
+}
