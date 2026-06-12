@@ -131,6 +131,19 @@ export function SignInPage() {
 /** Gates instructor pages: signed in -> email verified -> admin approved. */
 export function RequireInstructor({ children }: { children: ReactNode }) {
   const { user, profile, loading } = useAuth();
+  const [resendError, setResendError] = useState("");
+  const [resendDone, setResendDone] = useState(false);
+
+  async function resend() {
+    setResendError("");
+    setResendDone(false);
+    try {
+      await sendEmailVerification(user!);
+      setResendDone(true);
+    } catch (err) {
+      setResendError(err instanceof Error ? err.message : String(err));
+    }
+  }
 
   if (loading) {
     return (
@@ -147,8 +160,10 @@ export function RequireInstructor({ children }: { children: ReactNode }) {
         <p className="mb-3 text-sm text-slate-600">
           We sent a verification link to <strong>{user.email}</strong>. Click it, then reload this page.
         </p>
+        {resendDone && <p className="mb-3 text-sm text-emerald-600">Verification email sent again.</p>}
+        <ErrorText>{resendError}</ErrorText>
         <div className="flex gap-2">
-          <Button onClick={() => sendEmailVerification(user)}>Resend email</Button>
+          <Button onClick={resend}>Resend email</Button>
           <Button variant="secondary" onClick={() => window.location.reload()}>
             I verified — reload
           </Button>
