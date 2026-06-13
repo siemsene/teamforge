@@ -1,17 +1,13 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useSession } from "./SessionContext";
-import { deleteSessionCompletely, updatePublicConfig, updateSession } from "../../lib/db";
+import { deleteSessionCompletely, updateSession, updateSessionStatus } from "../../lib/db";
 import { surveyUrl } from "../../lib/util";
 import type { SessionStatus } from "../../types";
-import { Button, Card, ErrorText, TextArea } from "../../components/ui";
+import { Button, Card, ConfirmDialog, ErrorText, TextArea } from "../../components/ui";
+import { getSessionReadiness } from "./readiness";
 
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
-
-async function applyStatus(sid: string, status: SessionStatus) {
-  await updateSession(sid, { status });
-  await updatePublicConfig(sid, { status });
-}
 
 function defaultEmailTemplate(title: string, link: string): string {
   return `Subject: ${title} — team formation survey
@@ -29,7 +25,7 @@ Thank you!`;
 }
 
 export function OverviewTab() {
-  const { sid, session, students, publicConfig } = useSession();
+  const { sid, session, students, publicConfig, projects } = useSession();
   const navigate = useNavigate();
   const [copied, setCopied] = useState("");
   const submitted = students.filter((s) => s.submittedAt).length;
@@ -40,7 +36,9 @@ export function OverviewTab() {
   const [savedMsg, setSavedMsg] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const dirty = template !== (session.emailTemplate ?? fallback);
+  const readiness = getSessionReadiness(session, publicConfig, projects);
 
   async function copy(text: string, which: string) {
     await navigator.clipboard.writeText(text);
@@ -50,8 +48,12 @@ export function OverviewTab() {
 
   async function changeStatus(status: SessionStatus) {
     setError("");
+    if (status === "open" && readiness.blockers.length > 0) {
+      setError(`Before opening, fix: ${readiness.blockers.map((i) => i.label).join(", ")}.`);
+      return;
+    }
     try {
-      await applyStatus(sid, status);
+      await updateSessionStatus(sid, status);
     } catch (e) {
       setError(`Could not change status: ${errMsg(e)}`);
     }
@@ -72,12 +74,6 @@ export function OverviewTab() {
   }
 
   async function deleteSession() {
-    if (
-      !window.confirm(
-        `Permanently delete the ENTIRE session "${session.title}" — students, projects, survey, constraints, allocation?\n\nThis cannot be undone.`,
-      )
-    )
-      return;
     setBusy(true);
     setError("");
     try {
@@ -92,6 +88,29 @@ export function OverviewTab() {
   return (
     <div className="space-y-4">
       <Card>
+        <h2 className="mb-2 font-semibold">Setup readiness</h2>
+        <div className="grid gap-2 sm:grid-cols-2">
+          {readiness.items.map((item) => (
+            <div
+              key={item.id}
+              className={`rounded-md border p-2 text-sm ${
+                item.ok
+                  ? "border-emerald-200 bg-emerald-50 text-emerald-900"
+                  : item.severity === "blocker"
+                    ? "border-red-200 bg-red-50 text-red-900"
+                    : "border-amber-200 bg-amber-50 text-amber-900"
+              }`}
+            >
+              <div className="font-medium">
+                {item.ok ? "Ready" : item.severity === "blocker" ? "Needs work" : "Optional"}: {item.label}
+              </div>
+              {item.detail && <div className="mt-0.5 text-xs opacity-80">{item.detail}</div>}
+            </div>
+          ))}
+        </div>
+      </Card>
+
+      <Card>
         <h2 className="mb-2 font-semibold">Session status</h2>
         <p className="mb-3 text-sm text-slate-600">
           <strong>Draft:</strong> set up projects, survey and constraints — students cannot submit yet.{" "}
@@ -104,6 +123,7 @@ export function OverviewTab() {
               key={s}
               variant={session.status === s ? "primary" : "secondary"}
               onClick={() => changeStatus(s)}
+              disabled={busy || (s === "open" && readiness.blockers.length > 0)}
             >
               {s}
             </Button>
@@ -170,11 +190,25 @@ export function OverviewTab() {
             Permanently delete this entire session and all its data. For finer-grained options (e.g. purging only
             student responses), see the <strong>Privacy &amp; data</strong> tab.
           </p>
-          <Button variant="danger" disabled={busy} onClick={deleteSession}>
+          <Button variant="danger" disabled={busy} onClick={() => setConfirmDelete(true)}>
             Delete session
           </Button>
         </div>
       </Card>
+      <ConfirmDialog
+        open={confirmDelete}
+        title="Delete entire session?"
+        confirmLabel="Delete session"
+        busy={busy}
+        onCancel={() => setConfirmDelete(false)}
+        onConfirm={deleteSession}
+      >
+        <p>
+          This permanently deletes <strong>{session.title}</strong>, including students, projects, survey,
+          constraints, and allocation.
+        </p>
+        <p>This cannot be undone.</p>
+      </ConfirmDialog>
     </div>
   );
 }

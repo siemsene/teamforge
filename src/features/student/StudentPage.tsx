@@ -6,7 +6,7 @@ import { getPublicConfig, getStudentByHash, submitResponse, withdrawResponse } f
 import { hashCode, normalizeCode } from "../../lib/codes";
 import { eciesEncrypt } from "../../lib/crypto";
 import type { PublicConfig, StudentDoc, SurveyAnswers } from "../../types";
-import { Button, Card, ErrorText, Field, Input, Spinner } from "../../components/ui";
+import { Button, Card, ConfirmDialog, ErrorText, Field, Input, Spinner } from "../../components/ui";
 import { SurveyForm } from "./SurveyForm";
 
 type Stage =
@@ -169,6 +169,7 @@ function SurveyStage({
 }) {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [confirmWithdraw, setConfirmWithdraw] = useState(false);
   const alreadySubmitted = !!student.submittedAt;
 
   if (config.status !== "open") {
@@ -197,11 +198,15 @@ function SurveyStage({
   }
 
   async function withdraw() {
-    if (!window.confirm("Withdraw your response? Your encrypted answers will be deleted.")) return;
     setBusy(true);
-    await withdrawResponse(sid, hash);
-    setBusy(false);
-    onDone(false);
+    try {
+      await withdrawResponse(sid, hash);
+      onDone(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setBusy(false);
+      setConfirmWithdraw(false);
+    }
   }
 
   const showsTeammates = config.questions.some((q) => q.kind === "teammates");
@@ -214,7 +219,7 @@ function SurveyStage({
           <div className="mt-2 rounded-md bg-amber-50 p-2 text-sm text-amber-800">
             You already submitted a response. Submitting again replaces it (answers are encrypted, so they can't be
             pre-filled here).{" "}
-            <button className="font-medium underline" onClick={withdraw} disabled={busy}>
+            <button className="font-medium underline" onClick={() => setConfirmWithdraw(true)} disabled={busy}>
               Withdraw my response
             </button>
           </div>
@@ -232,6 +237,16 @@ function SurveyStage({
       )}
       <SurveyForm config={config} busy={busy} onSubmit={submit} />
       <ErrorText>{error}</ErrorText>
+      <ConfirmDialog
+        open={confirmWithdraw}
+        title="Withdraw response?"
+        confirmLabel="Withdraw response"
+        busy={busy}
+        onCancel={() => setConfirmWithdraw(false)}
+        onConfirm={withdraw}
+      >
+        <p>Your encrypted answers will be deleted. You can submit again while the survey remains open.</p>
+      </ConfirmDialog>
     </>
   );
 }

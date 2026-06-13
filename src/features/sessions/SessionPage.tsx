@@ -8,6 +8,7 @@ import { ConstraintsTab } from "../constraints/ConstraintsTab";
 import { ResponsesTab } from "../completion/ResponsesTab";
 import { AllocationTab } from "../allocation/AllocationTab";
 import { Badge, Spinner } from "../../components/ui";
+import { getSessionReadiness } from "./readiness";
 
 const STATUS_TONE = { draft: "gray", open: "green", closed: "amber" } as const;
 
@@ -47,13 +48,23 @@ function Tabs() {
 }
 
 function SessionBody() {
-  const { session } = useSession();
+  const { session, publicConfig, projects, students } = useSession();
+  const readiness = getSessionReadiness(session, publicConfig, projects);
   return (
     <div className="mx-auto max-w-5xl px-4 py-6">
       <div className="mb-2 flex items-center gap-3">
         <h1 className="text-2xl font-bold">{session.title}</h1>
         <Badge tone={STATUS_TONE[session.status]}>{session.status}</Badge>
       </div>
+      <SetupProgress
+        hasProjects={session.genericProjects || projects.length > 0}
+        hasSurvey={publicConfig.questions.length > 0}
+        hasConstraints={session.constraints.length > 0}
+        isReady={readiness.blockers.length === 0}
+        submitted={students.filter((s) => s.submittedAt).length}
+        total={students.length}
+        hasAllocation={session.status === "closed"}
+      />
       <Tabs />
       <Routes>
         <Route index element={<OverviewTab />} />
@@ -69,14 +80,64 @@ function SessionBody() {
   );
 }
 
+function SetupProgress({
+  hasProjects,
+  hasSurvey,
+  hasConstraints,
+  isReady,
+  submitted,
+  total,
+  hasAllocation,
+}: {
+  hasProjects: boolean;
+  hasSurvey: boolean;
+  hasConstraints: boolean;
+  isReady: boolean;
+  submitted: number;
+  total: number;
+  hasAllocation: boolean;
+}) {
+  const steps = [
+    { label: "Teams", done: hasProjects },
+    { label: "Survey", done: hasSurvey },
+    { label: "Goals", done: hasConstraints },
+    { label: "Ready", done: isReady },
+    { label: "Responses", done: total > 0 && submitted === total, note: `${submitted}/${total}` },
+    { label: "Allocation", done: hasAllocation },
+  ];
+  return (
+    <div className="mb-4 overflow-x-auto rounded-md border border-slate-200 bg-white px-3 py-2">
+      <ol className="flex min-w-max items-center gap-2 text-xs">
+        {steps.map((step, i) => (
+          <li key={step.label} className="flex items-center gap-2">
+            {i > 0 && <span className="h-px w-5 bg-slate-200" />}
+            <span
+              className={`rounded-full px-2 py-1 font-medium ${
+                step.done ? "bg-emerald-100 text-emerald-800" : "bg-slate-100 text-slate-500"
+              }`}
+            >
+              {step.label}
+              {step.note ? ` ${step.note}` : ""}
+            </span>
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+}
+
 export function SessionPage() {
   const { sid } = useParams<{ sid: string }>();
   if (!sid) return <Navigate to="/dashboard" replace />;
   return (
     <SessionProvider sid={sid}>
-      {(loaded) =>
+      {(loaded, problem) =>
         loaded ? (
           <SessionBody />
+        ) : problem ? (
+          <div className="mx-auto mt-16 max-w-xl rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+            {problem}
+          </div>
         ) : (
           <div className="mt-24 flex justify-center">
             <Spinner label="Loading session…" />

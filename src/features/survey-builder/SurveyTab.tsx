@@ -5,7 +5,18 @@ import { randomId } from "../../lib/util";
 import type { Question, QuestionKind } from "../../types";
 import { QUESTION_TEMPLATES, TEMPLATE_CATEGORIES } from "./questionTemplates";
 import { dedupeOptions } from "./autoQuestions";
-import { Badge, Button, Card, ErrorText, Field, Input, NumberInput, Select, TextArea } from "../../components/ui";
+import {
+  Badge,
+  Button,
+  Card,
+  ConfirmDialog,
+  ErrorText,
+  Field,
+  Input,
+  NumberInput,
+  Select,
+  TextArea,
+} from "../../components/ui";
 
 const KIND_LABELS: Record<QuestionKind, string> = {
   number: "Numeric (scale)",
@@ -16,10 +27,12 @@ const KIND_LABELS: Record<QuestionKind, string> = {
 };
 
 export function SurveyTab() {
-  const { sid, session, publicConfig } = useSession();
+  const { sid, session, publicConfig, projects } = useSession();
   const questions = publicConfig.questions;
   const [editing, setEditing] = useState<Question | null>(null);
   const [showForm, setShowForm] = useState(false);
+  const [actionError, setActionError] = useState("");
+  const [deleteQuestion, setDeleteQuestion] = useState<Question | null>(null);
 
   async function save(question: Question) {
     const exists = questions.some((q) => q.id === question.id);
@@ -31,12 +44,19 @@ export function SurveyTab() {
 
   async function remove(id: string) {
     const q = questions.find((x) => x.id === id);
+    if (!q) return;
     if (q?.auto && q.kind === "single") {
-      window.alert("This question was generated from project requirements. Remove the requirements first.");
+      setActionError("This question was generated from project requirements. Remove the requirements first.");
       return;
     }
-    if (!window.confirm("Delete this question?")) return;
-    await updatePublicConfig(sid, { questions: questions.filter((x) => x.id !== id) });
+    setActionError("");
+    setDeleteQuestion(q);
+  }
+
+  async function confirmRemove() {
+    if (!deleteQuestion) return;
+    await updatePublicConfig(sid, { questions: questions.filter((x) => x.id !== deleteQuestion.id) });
+    setDeleteQuestion(null);
   }
 
   async function move(id: string, dir: -1 | 1) {
@@ -64,12 +84,21 @@ export function SurveyTab() {
           Add question
         </Button>
       </div>
+      <ErrorText>{actionError}</ErrorText>
 
       {showForm && (
         <QuestionForm
           key={editing?.id ?? "new"}
           initial={editing}
           hasTeammatesQuestion={questions.some((q) => q.kind === "teammates" && q.id !== editing?.id)}
+          requiredAutoOptions={
+            editing?.auto && editing.kind === "single" && editing.attributeKey
+              ? projects
+                  .flatMap((p) => p.requirements)
+                  .filter((r) => r.attributeKey === editing.attributeKey)
+                  .map((r) => r.value)
+              : []
+          }
           onSave={save}
           onCancel={() => {
             setEditing(null);
@@ -130,6 +159,18 @@ export function SurveyTab() {
           </div>
         </Card>
       ))}
+      <ConfirmDialog
+        open={!!deleteQuestion}
+        title="Delete question?"
+        confirmLabel="Delete question"
+        busy={false}
+        onCancel={() => setDeleteQuestion(null)}
+        onConfirm={confirmRemove}
+      >
+        <p>
+          Delete <strong>{deleteQuestion?.prompt}</strong> from the student survey?
+        </p>
+      </ConfirmDialog>
     </div>
   );
 }
@@ -137,11 +178,13 @@ export function SurveyTab() {
 function QuestionForm({
   initial,
   hasTeammatesQuestion,
+  requiredAutoOptions,
   onSave,
   onCancel,
 }: {
   initial: Question | null;
   hasTeammatesQuestion: boolean;
+  requiredAutoOptions: string[];
   onSave: (q: Question) => Promise<void>;
   onCancel: () => void;
 }) {
@@ -195,7 +238,7 @@ function QuestionForm({
       const hasLabels = pointLabels.some(Boolean);
       q = { ...base, kind, min, max, ...(hasLabels ? { labels: pointLabels } : {}) };
     } else if (kind === "single" || kind === "multi") {
-      const opts = dedupeOptions(options.split("\n"));
+      const opts = dedupeOptions([...options.split("\n"), ...requiredAutoOptions]);
       if (opts.length < 2) return setError("Provide at least two distinct options (one per line).");
       q = { ...base, kind, options: opts };
     } else if (kind === "projectRanking") {
@@ -246,7 +289,11 @@ function QuestionForm({
         {(kind === "single" || kind === "multi") && (
           <Field
             label="Options (one per line)"
-            hint={isAutoSingle ? "Options coming from project requirements cannot be removed here." : undefined}
+            hint={
+              isAutoSingle
+                ? "Values required by projects are restored automatically if removed here."
+                : undefined
+            }
           >
             <TextArea rows={4} value={options} onChange={(e) => setOptions(e.target.value)} />
           </Field>

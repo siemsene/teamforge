@@ -40,6 +40,33 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/sessions/$(sid)).data.status == "open";
     }
 
+    function isJwkPublicKey(value) {
+      return value is map
+        && value.keys().hasAll(["kty", "crv", "x", "y"])
+        && value.keys().hasOnly(["kty", "crv", "key_ops", "ext", "x", "y"])
+        && value.kty is string
+        && value.crv is string
+        && value.x is string
+        && value.y is string;
+    }
+
+    function isEciesPayload(value) {
+      return value == null
+        || (value is map
+            && value.keys().hasAll(["ephemeralPublicKeyJwk", "iv", "ciphertext"])
+            && value.keys().hasOnly(["ephemeralPublicKeyJwk", "iv", "ciphertext"])
+            && isJwkPublicKey(value.ephemeralPublicKeyJwk)
+            && value.iv is string
+            && value.ciphertext is string);
+    }
+
+    function isValidStudentResponseUpdate() {
+      return request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(["response", "submittedAt"])
+        && isEciesPayload(request.resource.data.response)
+        && (request.resource.data.submittedAt == null || request.resource.data.submittedAt is number);
+    }
+
     match /users/{uid} {
       // Self-registration always starts unapproved.
       allow create: if isSignedIn()
@@ -82,8 +109,7 @@ service cloud.firestore {
         allow update: if ownsSession(sid)
           || (isSignedIn()
               && sessionIsOpen(sid)
-              && request.resource.data.diff(resource.data).affectedKeys()
-                   .hasOnly(["response", "submittedAt"]));
+              && isValidStudentResponseUpdate());
       }
 
       match /results/{docId} {

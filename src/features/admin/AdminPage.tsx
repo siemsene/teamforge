@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { Navigate } from "react-router-dom";
 import { setInstructorApproved, watchAllInstructors } from "../../lib/db";
+import { approvalEmailHref } from "../../lib/email";
 import { useAuth } from "../auth/AuthContext";
 import type { InstructorProfile, InstructorUsage } from "../../types";
-import { Badge, Button, Card, Spinner } from "../../components/ui";
+import { Badge, Button, Card, ErrorText, Spinner } from "../../components/ui";
 
 function formatUsage(usage: InstructorUsage | undefined): string {
   if (!usage) return "No usage data yet";
@@ -16,6 +17,7 @@ function formatUsage(usage: InstructorUsage | undefined): string {
 export function AdminPage() {
   const { isAdmin, loading } = useAuth();
   const [rows, setRows] = useState<(InstructorProfile & { uid: string })[] | null>(null);
+  const [error, setError] = useState("");
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -31,9 +33,20 @@ export function AdminPage() {
     (a, b) => (b.usage?.students ?? 0) - (a.usage?.students ?? 0),
   );
 
+  async function approveInstructor(row: InstructorProfile & { uid: string }) {
+    setError("");
+    try {
+      await setInstructorApproved(row.uid, true);
+      window.location.href = approvalEmailHref(row.name, row.email);
+    } catch (e) {
+      setError(`Could not approve instructor: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
   return (
     <div className="mx-auto max-w-3xl space-y-6 px-4 py-8">
       <h1 className="text-2xl font-bold">Admin — instructor approval</h1>
+      <ErrorText>{error}</ErrorText>
       {!rows ? (
         <Spinner />
       ) : (
@@ -53,7 +66,7 @@ export function AdminPage() {
                       {r.email} · registered {new Date(r.createdAt).toLocaleDateString()}
                     </div>
                   </div>
-                  <Button onClick={() => setInstructorApproved(r.uid, true)}>Approve</Button>
+                  <Button onClick={() => approveInstructor(r)}>Approve</Button>
                 </li>
               ))}
             </ul>

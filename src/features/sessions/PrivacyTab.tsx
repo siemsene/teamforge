@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useSession } from "./SessionContext";
 import { deleteSessionCompletely, purgeStudentData } from "../../lib/db";
-import { Button, Card, ErrorText } from "../../components/ui";
+import { Button, Card, ConfirmDialog, ErrorText } from "../../components/ui";
 
 export function PrivacyTab() {
   const { sid, session, students } = useSession();
@@ -10,21 +10,18 @@ export function PrivacyTab() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [confirmPurge, setConfirmPurge] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
   async function purge() {
-    if (
-      !window.confirm(
-        `Permanently delete all ${students.length} student records (encrypted responses, login code hashes) and any saved allocation for "${session.title}"?\n\nThis cannot be undone. Students would need new codes to participate again.`,
-      )
-    )
-      return;
     setBusy(true);
     setError("");
     setMessage("");
     try {
       const n = await purgeStudentData(sid);
       setMessage(`Deleted ${n} student records and the saved allocation.`);
+      setConfirmPurge(false);
     } catch (e) {
       setError(`Could not purge student data: ${errMsg(e)}`);
     } finally {
@@ -33,12 +30,6 @@ export function PrivacyTab() {
   }
 
   async function deleteAll() {
-    if (
-      !window.confirm(
-        `Permanently delete the ENTIRE session "${session.title}" — students, projects, survey, constraints, allocation?\n\nThis cannot be undone.`,
-      )
-    )
-      return;
     setBusy(true);
     setError("");
     try {
@@ -85,13 +76,13 @@ export function PrivacyTab() {
               Remove all student data ({students.length} records) and the allocation. Keeps projects, survey and
               constraints.
             </p>
-            <Button variant="danger" disabled={busy} onClick={purge}>
+            <Button variant="danger" disabled={busy} onClick={() => setConfirmPurge(true)}>
               Purge student data
             </Button>
           </div>
           <div className="flex items-center justify-between">
             <p className="text-sm text-slate-600">Delete the entire session.</p>
-            <Button variant="danger" disabled={busy} onClick={deleteAll}>
+            <Button variant="danger" disabled={busy} onClick={() => setConfirmDelete(true)}>
               Delete session
             </Button>
           </div>
@@ -99,6 +90,34 @@ export function PrivacyTab() {
           <ErrorText>{error}</ErrorText>
         </div>
       </Card>
+      <ConfirmDialog
+        open={confirmPurge}
+        title="Purge student data?"
+        confirmLabel="Purge data"
+        busy={busy}
+        onCancel={() => setConfirmPurge(false)}
+        onConfirm={purge}
+      >
+        <p>
+          This deletes all {students.length} student records, encrypted responses, login-code hashes, and any saved
+          allocation for <strong>{session.title}</strong>.
+        </p>
+        <p>Students would need new codes to participate again. This cannot be undone.</p>
+      </ConfirmDialog>
+      <ConfirmDialog
+        open={confirmDelete}
+        title="Delete entire session?"
+        confirmLabel="Delete session"
+        busy={busy}
+        onCancel={() => setConfirmDelete(false)}
+        onConfirm={deleteAll}
+      >
+        <p>
+          This permanently deletes <strong>{session.title}</strong>, including students, projects, survey,
+          constraints, and allocation.
+        </p>
+        <p>This cannot be undone.</p>
+      </ConfirmDialog>
     </div>
   );
 }

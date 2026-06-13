@@ -12,23 +12,40 @@ export interface SessionState {
 
 const SessionContext = createContext<SessionState | null>(null);
 
-export function SessionProvider({ sid, children }: { sid: string; children: (loaded: boolean) => ReactNode }) {
-  const [session, setSession] = useState<SessionDoc | null>(null);
-  const [publicConfig, setPublicConfig] = useState<PublicConfig | null>(null);
+export function SessionProvider({
+  sid,
+  children,
+}: {
+  sid: string;
+  children: (loaded: boolean, problem?: string) => ReactNode;
+}) {
+  const [session, setSession] = useState<SessionDoc | null | undefined>(undefined);
+  const [publicConfig, setPublicConfig] = useState<PublicConfig | null | undefined>(undefined);
   const [projects, setProjects] = useState<Project[]>([]);
   const [students, setStudents] = useState<(StudentDoc & { hash: string })[]>([]);
+  const [error, setError] = useState("");
 
-  useEffect(() => watchSession(sid, setSession), [sid]);
-  useEffect(() => watchPublicConfig(sid, setPublicConfig), [sid]);
+  useEffect(() => {
+    setSession(undefined);
+    setError("");
+    return watchSession(sid, setSession, (err) => setError(err.message));
+  }, [sid]);
+  useEffect(() => {
+    setPublicConfig(undefined);
+    setError("");
+    return watchPublicConfig(sid, setPublicConfig, (err) => setError(err.message));
+  }, [sid]);
   useEffect(() => watchProjects(sid, setProjects), [sid]);
   useEffect(() => watchStudents(sid, setStudents), [sid]);
 
-  const loaded = !!session && !!publicConfig;
+  const missing = session === null || publicConfig === null;
+  const problem = missing || error ? error || "Session not found or no longer available." : undefined;
+  const loaded = !!session && !!publicConfig && !error;
   return (
     <SessionContext.Provider
       value={loaded ? { sid, session: session!, publicConfig: publicConfig!, projects, students } : null}
     >
-      {children(loaded)}
+      {children(loaded, problem)}
     </SessionContext.Provider>
   );
 }

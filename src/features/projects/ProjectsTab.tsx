@@ -1,43 +1,59 @@
 import { useState, type FormEvent } from "react";
 import { useSession } from "../sessions/SessionContext";
-import { deleteProject, saveProject, updatePublicConfig, updateSession } from "../../lib/db";
+import { deleteProjectWithMirrors, saveProjectWithMirrors } from "../../lib/db";
 import { syncAutoQuestions, slugify } from "../survey-builder/autoQuestions";
 import { standardScaleOptions } from "../survey-builder/questionTemplates";
 import { syncProjectRequirementsConstraint } from "../constraints/autoConstraints";
 import { randomId } from "../../lib/util";
 import type { Project, ProjectRequirement } from "../../types";
-import { Badge, Button, Card, ErrorText, Field, Input, NumberInput, Select, TextArea } from "../../components/ui";
+import {
+  Badge,
+  Button,
+  Card,
+  ConfirmDialog,
+  ErrorText,
+  Field,
+  Input,
+  NumberInput,
+  Select,
+  TextArea,
+} from "../../components/ui";
 
 export function ProjectsTab() {
   const { sid, session, projects, publicConfig } = useSession();
   const [editing, setEditing] = useState<Project | null>(null);
   const [showForm, setShowForm] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<Project | null>(null);
 
   // Persisting a project also refreshes the student-facing mirror: project
   // blurbs and auto-generated survey questions.
-  async function persist(updatedProjects: Project[]) {
-    await updatePublicConfig(sid, {
+  function mirrorPatches(updatedProjects: Project[]) {
+    const publicPatch = {
       projects: updatedProjects.map((p) => ({ id: p.id, name: p.name, description: p.description })),
       questions: syncAutoQuestions(publicConfig.questions, updatedProjects, session.genericProjects),
-    });
+    };
     // Keep the umbrella project-requirements constraint in step with the
     // requirements just defined, so it shows up (weightable) on the Constraints tab.
     const constraints = syncProjectRequirementsConstraint(session.constraints, updatedProjects, session.genericProjects);
-    if (constraints !== session.constraints) await updateSession(sid, { constraints });
+    return {
+      publicPatch,
+      sessionPatch: constraints !== session.constraints ? { constraints } : undefined,
+    };
   }
 
   async function save(project: Project) {
-    await saveProject(sid, project);
     const updated = projects.filter((p) => p.id !== project.id).concat(project);
-    await persist(updated);
+    const { publicPatch, sessionPatch } = mirrorPatches(updated);
+    await saveProjectWithMirrors(sid, project, publicPatch, sessionPatch);
     setEditing(null);
     setShowForm(false);
   }
 
-  async function remove(pid: string) {
-    if (!window.confirm("Delete this project?")) return;
-    await deleteProject(sid, pid);
-    await persist(projects.filter((p) => p.id !== pid));
+  async function remove(project: Project) {
+    const updated = projects.filter((p) => p.id !== project.id);
+    const { publicPatch, sessionPatch } = mirrorPatches(updated);
+    await deleteProjectWithMirrors(sid, project.id, publicPatch, sessionPatch);
+    setDeleteTarget(null);
   }
 
   return (
@@ -100,13 +116,27 @@ export function ProjectsTab() {
               >
                 Edit
               </Button>
-              <Button variant="danger" onClick={() => remove(p.id)}>
+              <Button variant="danger" onClick={() => setDeleteTarget(p)}>
                 Delete
               </Button>
             </div>
           </div>
         </Card>
       ))}
+      <ConfirmDialog
+        open={!!deleteTarget}
+        title="Delete project?"
+        confirmLabel="Delete project"
+        onCancel={() => setDeleteTarget(null)}
+        onConfirm={() => {
+          if (deleteTarget) void remove(deleteTarget);
+        }}
+      >
+        <p>
+          Delete <strong>{deleteTarget?.name}</strong>? The student-facing project list, generated requirement
+          questions, and project-requirement constraint will be updated together.
+        </p>
+      </ConfirmDialog>
     </div>
   );
 }

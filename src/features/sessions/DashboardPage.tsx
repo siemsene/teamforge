@@ -87,6 +87,14 @@ export function DashboardPage() {
 function NewSessionForm({ onDone }: { onDone: () => void }) {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const [createdBundle, setCreatedBundle] = useState<{
+    sid: string;
+    title: string;
+    codesFilename: string;
+    codesCsv: string;
+    recoveryFilename: string;
+    recoveryText: string;
+  } | null>(null);
   const [title, setTitle] = useState("");
   const [numStudents, setNumStudents] = useState(30);
   const [idealTeamSize, setIdealTeamSize] = useState(5);
@@ -112,10 +120,16 @@ function NewSessionForm({ onDone }: { onDone: () => void }) {
     [numStudents, idealTeamSize],
   );
 
+  function downloadCreatedFiles(bundle: NonNullable<typeof createdBundle>) {
+    downloadFile(bundle.codesFilename, bundle.codesCsv, "text/csv");
+    downloadFile(bundle.recoveryFilename, bundle.recoveryText);
+  }
+
   async function submit(e: FormEvent) {
     e.preventDefault();
     setError("");
     if (!user) return;
+    if (!title.trim()) return setError("Session title is required.");
     if (passphrase.length < 10) return setError("Passphrase must be at least 10 characters.");
     if (passphrase !== passphrase2) return setError("Passphrases do not match.");
     if (minTeamSize > idealTeamSize || idealTeamSize > maxTeamSize)
@@ -161,26 +175,25 @@ function NewSessionForm({ onDone }: { onDone: () => void }) {
       // One-time downloads: login codes + recovery key. Codes are never stored
       // server-side (only their hashes), so this is the only copy.
       const link = surveyUrl(sid);
-      downloadFile(
-        sessionFilename(title.trim(), sid, "student-codes.csv"),
-        toCsv([
-          ["studentIndex", "loginCode", "shareCode", "surveyLink", "yourStudentName", "yourStudentEmail"],
-          ...codes.map((c, i) => [i + 1, c, shareCodes[i], link, "", ""]),
-        ]),
-        "text/csv",
-      );
-      downloadFile(
-        sessionFilename(title.trim(), sid, "recovery-key.txt"),
+      const codesFilename = sessionFilename(title.trim(), sid, "student-codes.csv");
+      const codesCsv = toCsv([
+        ["studentIndex", "loginCode", "shareCode", "surveyLink", "yourStudentName", "yourStudentEmail"],
+        ...codes.map((c, i) => [i + 1, c, shareCodes[i], link, "", ""]),
+      ]);
+      const recoveryFilename = sessionFilename(title.trim(), sid, "recovery-key.txt");
+      const recoveryText =
         `TeamForge recovery key for session "${title.trim()}" (${sid})\n` +
-          `Keep this file safe. It unlocks student data if you forget your passphrase.\n\n${recoveryKeyB64}\n`,
-      );
-      window.alert(
-        "Two files were downloaded:\n\n" +
-          "1. Student login codes (CSV) — assign a code to each student in the two empty columns and keep that list private. Codes are NOT stored on the server and cannot be re-downloaded. Each row also has a public 'shareCode' students use to list preferred teammates — that one is safe to share and cannot be used to log in.\n\n" +
-          "2. Recovery key — store it somewhere safe (not with the codes). It is the only way to unlock survey data if you forget your passphrase.",
-      );
-      onDone();
-      navigate(`/session/${sid}`);
+        `Keep this file safe. It unlocks student data if you forget your passphrase.\n\n${recoveryKeyB64}\n`;
+      const bundle = {
+        sid,
+        title: title.trim(),
+        codesFilename,
+        codesCsv,
+        recoveryFilename,
+        recoveryText,
+      };
+      downloadCreatedFiles(bundle);
+      setCreatedBundle(bundle);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -191,59 +204,102 @@ function NewSessionForm({ onDone }: { onDone: () => void }) {
   return (
     <Card>
       <h2 className="mb-3 font-semibold">New session</h2>
-      <form onSubmit={submit} className="space-y-3">
-        <Field label="Session title">
-          <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="MGMT 4500 Spring 2027" required />
-        </Field>
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <Field label="Students">
-            <NumberInput min={2} max={1000} value={numStudents} onValueChange={setNumStudents} />
-          </Field>
-          <Field label="Ideal team size">
-            <NumberInput min={1} value={idealTeamSize} onValueChange={handleIdealChange} />
-          </Field>
-          <Field label="Min team size">
-            <NumberInput
-              min={1}
-              value={minTeamSize}
-              onValueChange={(n) => {
-                setMinTouched(true);
-                setMinTeamSize(n);
+      {createdBundle ? (
+        <div className="space-y-3">
+          <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
+            <p className="font-medium">Session created: {createdBundle.title}</p>
+            <p className="mt-1">
+              Save both files now. Login codes are not stored in plaintext and cannot be recovered after leaving this
+              screen.
+            </p>
+          </div>
+          <div className="grid gap-2 text-sm sm:grid-cols-2">
+            <div className="rounded-md border border-slate-200 p-3">
+              <p className="font-medium">Student codes CSV</p>
+              <p className="mt-1 text-slate-600">
+                Assign one login code per student. Share codes are safe for teammate preferences.
+              </p>
+            </div>
+            <div className="rounded-md border border-slate-200 p-3">
+              <p className="font-medium">Recovery key</p>
+              <p className="mt-1 text-slate-600">Store separately from the codes CSV.</p>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" variant="secondary" onClick={() => downloadCreatedFiles(createdBundle)}>
+              Download both files again
+            </Button>
+            <Button
+              type="button"
+              onClick={() => {
+                onDone();
+                navigate(`/session/${createdBundle.sid}`);
               }}
+            >
+              I saved both files
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <form onSubmit={submit} className="space-y-3">
+          <Field label="Session title">
+            <Input
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="MGMT 4500 Spring 2027"
+              required
             />
           </Field>
-          <Field label="Max team size">
-            <NumberInput
-              min={1}
-              value={maxTeamSize}
-              onValueChange={(n) => {
-                setMaxTouched(true);
-                setMaxTeamSize(n);
-              }}
-            />
-          </Field>
-        </div>
-        <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" checked={genericProjects} onChange={(e) => setGenericProjects(e.target.checked)} />
-          Generic projects — just split students into {defaultTeams} teams, no named projects
-        </label>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Field label="Encryption passphrase" hint="Encrypts all student data. Min 10 characters.">
-            <Input type="password" value={passphrase} onChange={(e) => setPassphrase(e.target.value)} required />
-          </Field>
-          <Field label="Repeat passphrase">
-            <Input type="password" value={passphrase2} onChange={(e) => setPassphrase2(e.target.value)} required />
-          </Field>
-        </div>
-        <p className="rounded-md bg-amber-50 p-2 text-xs text-amber-800">
-          Student answers are encrypted with a key only you control. If you lose both the passphrase and the recovery
-          key file (downloaded next), the data is permanently unreadable — by design, nobody can recover it for you.
-        </p>
-        <ErrorText>{error}</ErrorText>
-        <Button type="submit" disabled={busy}>
-          {busy ? "Generating keys and codes…" : "Create session"}
-        </Button>
-      </form>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <Field label="Students">
+              <NumberInput min={2} max={1000} value={numStudents} onValueChange={setNumStudents} />
+            </Field>
+            <Field label="Ideal team size">
+              <NumberInput min={1} value={idealTeamSize} onValueChange={handleIdealChange} />
+            </Field>
+            <Field label="Min team size">
+              <NumberInput
+                min={1}
+                value={minTeamSize}
+                onValueChange={(n) => {
+                  setMinTouched(true);
+                  setMinTeamSize(n);
+                }}
+              />
+            </Field>
+            <Field label="Max team size">
+              <NumberInput
+                min={1}
+                value={maxTeamSize}
+                onValueChange={(n) => {
+                  setMaxTouched(true);
+                  setMaxTeamSize(n);
+                }}
+              />
+            </Field>
+          </div>
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={genericProjects} onChange={(e) => setGenericProjects(e.target.checked)} />
+            Generic projects — just split students into {defaultTeams} teams, no named projects
+          </label>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field label="Encryption passphrase" hint="Encrypts all student data. Min 10 characters.">
+              <Input type="password" value={passphrase} onChange={(e) => setPassphrase(e.target.value)} required />
+            </Field>
+            <Field label="Repeat passphrase">
+              <Input type="password" value={passphrase2} onChange={(e) => setPassphrase2(e.target.value)} required />
+            </Field>
+          </div>
+          <p className="rounded-md bg-amber-50 p-2 text-xs text-amber-800">
+            Student answers are encrypted with a key only you control. If you lose both the passphrase and the recovery
+            key file (downloaded next), the data is permanently unreadable — by design, nobody can recover it for you.
+          </p>
+          <ErrorText>{error}</ErrorText>
+          <Button type="submit" disabled={busy}>
+            {busy ? "Generating keys and codes…" : "Create session"}
+          </Button>
+        </form>
+      )}
     </Card>
   );
 }

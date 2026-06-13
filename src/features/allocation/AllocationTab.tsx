@@ -9,12 +9,18 @@ import type { SolveResult, SolverInput, SolverStudent, SolverTeam, WorkerRespons
 import type { Allocation, SurveyAnswers } from "../../types";
 import { Button, Card, ErrorText, Field, Input, NumberInput, Spinner } from "../../components/ui";
 import { TeamBoard } from "./TeamBoard";
+import { getSessionReadiness } from "../sessions/readiness";
 
 type Phase =
   | { name: "locked" }
   | { name: "decrypting" }
   | { name: "ready" }
   | { name: "solving"; message: string };
+
+interface ResponseProblem {
+  codeIndex: number;
+  message: string;
+}
 
 export function AllocationTab() {
   const { sid, session, publicConfig, projects, students } = useSession();
@@ -24,8 +30,10 @@ export function AllocationTab() {
   const privateKeyRef = useRef<CryptoKey | null>(null);
   const [solverStudents, setSolverStudents] = useState<SolverStudent[] | null>(null);
   const [assignment, setAssignment] = useState<Record<string, string[]> | null>(null);
+  const [responseProblems, setResponseProblems] = useState<ResponseProblem[]>([]);
   const workerRef = useRef<Worker | null>(null);
   const [timeLimit, setTimeLimit] = useState(60);
+  const readiness = useMemo(() => getSessionReadiness(session, publicConfig, projects), [session, publicConfig, projects]);
 
   const teams: SolverTeam[] = useMemo(() => {
     if (session.genericProjects) {
@@ -79,26 +87,43 @@ export function AllocationTab() {
         students.filter((s) => s.shareCode).map((s) => [normalizeCode(s.shareCode!), s.hash]),
       );
       const decrypted: SolverStudent[] = [];
+      const problems: ResponseProblem[] = [];
       for (const s of students) {
         let answers: SurveyAnswers = {};
         if (s.response) {
-          answers = JSON.parse(await eciesDecrypt(privateKey, s.response)) as SurveyAnswers;
-          if (teammatesQ && Array.isArray(answers[teammatesQ.id])) {
-            answers[teammatesQ.id] = (answers[teammatesQ.id] as string[])
-              .map((code) => shareToHash.get(normalizeCode(code)))
-              .filter((h): h is string => Boolean(h));
+          try {
+            answers = JSON.parse(await eciesDecrypt(privateKey, s.response)) as SurveyAnswers;
+            if (teammatesQ && Array.isArray(answers[teammatesQ.id])) {
+              answers[teammatesQ.id] = (answers[teammatesQ.id] as string[])
+                .map((code) => shareToHash.get(normalizeCode(code)))
+                .filter((h): h is string => Boolean(h));
+            }
+          } catch (err) {
+            problems.push({
+              codeIndex: s.codeIndex,
+              message: err instanceof Error ? err.message : "Could not decrypt or parse this response.",
+            });
           }
         }
         decrypted.push({ hash: s.hash, codeIndex: s.codeIndex, answers, submitted: !!s.submittedAt });
       }
       setSolverStudents(decrypted);
+      setResponseProblems(problems);
 
       // Load a previously saved allocation if there is one.
       const saved = await getAllocationDoc(sid);
       if (saved) {
-        const alloc = JSON.parse(await eciesDecrypt(privateKey, saved.payload)) as Allocation;
-        setAssignment(alloc.teams);
-        setInfo("Loaded the previously saved allocation.");
+        try {
+          const alloc = JSON.parse(await eciesDecrypt(privateKey, saved.payload)) as Allocation;
+          setAssignment(alloc.teams);
+          setInfo("Loaded the previously saved allocation.");
+        } catch (err) {
+          setInfo(
+            `Student responses were unlocked, but the saved allocation could not be loaded: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          );
+        }
       }
       setPhase({ name: "ready" });
     } catch (err) {
@@ -215,7 +240,7 @@ export function AllocationTab() {
               Cancel
             </Button>
           ) : (
-            <Button onClick={runSolver} disabled={teams.length === 0}>
+            <Button onClick={runSolver} disabled={teams.length === 0 || readiness.blockers.length > 0}>
               {assignment ? "Re-run optimizer" : "Run optimizer"}
             </Button>
           )}
@@ -229,8 +254,33 @@ export function AllocationTab() {
         {phase.name === "solving" && <Spinner label={phase.message} />}
         <ErrorText>{error}</ErrorText>
         {info && <p className="mt-2 text-sm text-green-700">{info}</p>}
+        {responseProblems.length > 0 && (
+          <div className="mt-2 rounded-md bg-amber-50 p-3 text-sm text-amber-900">
+            <p className="font-medium">
+              {responseProblems.length} submitted response{responseProblems.length === 1 ? "" : "s"} could not be
+              read.
+            </p>
+            <p className="mt-1">
+              Those students are still placed for team-size purposes, but their survey answers and preferences are
+              ignored until they resubmit.
+            </p>
+            <ul className="mt-2 list-disc pl-5">
+              {responseProblems.map((p) => (
+                <li key={p.codeIndex}>
+                  #{p.codeIndex}: {p.message}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
         {teams.length === 0 && (
           <p className="mt-2 text-sm text-amber-700">Define projects first (or mark the session as generic).</p>
+        )}
+        {readiness.blockers.length > 0 && (
+          <p className="mt-2 text-sm text-amber-700">
+            Fix setup readiness blockers before running the optimizer:{" "}
+            {readiness.blockers.map((b) => b.label).join(", ")}.
+          </p>
         )}
         {largeProblem && phase.name !== "solving" && (
           <p className="mt-2 text-sm text-amber-700">

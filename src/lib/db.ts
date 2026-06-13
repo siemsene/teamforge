@@ -18,6 +18,7 @@ import {
   updateDoc,
   where,
   writeBatch,
+  type FirestoreError,
   type Unsubscribe,
 } from "firebase/firestore";
 import { db } from "./firebase";
@@ -117,22 +118,37 @@ export function watchSessions(ownerUid: string, cb: (rows: SessionSummary[]) => 
   });
 }
 
-export function watchSession(sid: string, cb: (s: SessionDoc | null) => void): Unsubscribe {
+export function watchSession(
+  sid: string,
+  cb: (s: SessionDoc | null) => void,
+  onError?: (err: FirestoreError) => void,
+): Unsubscribe {
   return onSnapshot(doc(db, "sessions", sid), (snap) => {
     cb(snap.exists() ? (snap.data() as SessionDoc) : null);
-  });
+  }, onError);
 }
 
 export async function updateSession(sid: string, patch: Partial<SessionDoc>): Promise<void> {
   await updateDoc(doc(db, "sessions", sid), { ...patch, updatedAt: Date.now() });
 }
 
+export async function updateSessionStatus(sid: string, status: SessionDoc["status"]): Promise<void> {
+  const batch = writeBatch(db);
+  batch.update(doc(db, "sessions", sid), { status, updatedAt: Date.now() });
+  batch.update(doc(db, "sessions", sid, "public", "config"), { status });
+  await batch.commit();
+}
+
 // ---------- public config (the student-facing mirror) ----------
 
-export function watchPublicConfig(sid: string, cb: (c: PublicConfig | null) => void): Unsubscribe {
+export function watchPublicConfig(
+  sid: string,
+  cb: (c: PublicConfig | null) => void,
+  onError?: (err: FirestoreError) => void,
+): Unsubscribe {
   return onSnapshot(doc(db, "sessions", sid, "public", "config"), (snap) => {
     cb(snap.exists() ? (snap.data() as PublicConfig) : null);
-  });
+  }, onError);
 }
 
 export async function getPublicConfig(sid: string): Promise<PublicConfig | null> {
@@ -160,6 +176,32 @@ export async function saveProject(sid: string, project: Project): Promise<void> 
 
 export async function deleteProject(sid: string, pid: string): Promise<void> {
   await deleteDoc(doc(db, "sessions", sid, "projects", pid));
+}
+
+export async function saveProjectWithMirrors(
+  sid: string,
+  project: Project,
+  publicPatch: Partial<PublicConfig>,
+  sessionPatch?: Partial<SessionDoc>,
+): Promise<void> {
+  const batch = writeBatch(db);
+  batch.set(doc(db, "sessions", sid, "projects", project.id), project);
+  batch.update(doc(db, "sessions", sid, "public", "config"), publicPatch);
+  if (sessionPatch) batch.update(doc(db, "sessions", sid), { ...sessionPatch, updatedAt: Date.now() });
+  await batch.commit();
+}
+
+export async function deleteProjectWithMirrors(
+  sid: string,
+  pid: string,
+  publicPatch: Partial<PublicConfig>,
+  sessionPatch?: Partial<SessionDoc>,
+): Promise<void> {
+  const batch = writeBatch(db);
+  batch.delete(doc(db, "sessions", sid, "projects", pid));
+  batch.update(doc(db, "sessions", sid, "public", "config"), publicPatch);
+  if (sessionPatch) batch.update(doc(db, "sessions", sid), { ...sessionPatch, updatedAt: Date.now() });
+  await batch.commit();
 }
 
 // ---------- students ----------

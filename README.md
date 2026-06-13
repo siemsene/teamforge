@@ -51,6 +51,8 @@ npm run dev
 
 ```sh
 npm test   # crypto round-trips, login codes, MIP solver correctness & scale
+npm run lint   # TypeScript-only static check
+npm run test:rules   # Firestore security rules against the emulator
 ```
 
 ### Guides (PDF)

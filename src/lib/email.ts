@@ -55,3 +55,23 @@ export async function notifyAdminOfRegistration(name: string, email: string, uni
     console.warn("Admin notification error:", err);
   }
 }
+
+export function approvalEmailSubject(): string {
+  return "TeamForge instructor account approved";
+}
+
+export function approvalEmailBody(name: string): string {
+  return `Hello ${name},
+
+Your TeamForge instructor account has been approved.
+
+You can now sign in and create classroom team-allocation sessions.
+
+TeamForge`;
+}
+
+export function approvalEmailHref(name: string, email: string): string {
+  const subject = encodeURIComponent(approvalEmailSubject());
+  const body = encodeURIComponent(approvalEmailBody(name));
+  return `mailto:${encodeURIComponent(email)}?subject=${subject}&body=${body}`;
+}

@@ -15,6 +15,18 @@ import { deleteDoc, doc, getDoc, getDocs, collection, setDoc, updateDoc, writeBa
 const emulatorHost = process.env.FIRESTORE_EMULATOR_HOST;
 const rules = readFileSync("firestore.rules", "utf8");
 const ADMIN_UID = /return\s+"([^"]+)";/.exec(rules)![1];
+const VALID_PAYLOAD = {
+  ephemeralPublicKeyJwk: {
+    kty: "EC",
+    crv: "P-256",
+    key_ops: [],
+    ext: true,
+    x: "abc",
+    y: "def",
+  },
+  iv: "iv",
+  ciphertext: "ct",
+};
 
 describe.skipIf(!emulatorHost)("firestore security rules", () => {
   let env: RulesTestEnvironment;
@@ -41,7 +53,7 @@ describe.skipIf(!emulatorHost)("firestore security rules", () => {
       await setDoc(doc(db, "sessions/s1"), { ownerUid: "owner1", status: "open", title: "T" });
       await setDoc(doc(db, "sessions/s1/public/config"), { title: "T", status: "open" });
       await setDoc(doc(db, "sessions/s1/students/hashA"), { codeIndex: 1, submittedAt: null, response: null });
-      await setDoc(doc(db, "sessions/s1/results/allocation"), { payload: "ciphertext", updatedAt: 1 });
+      await setDoc(doc(db, "sessions/s1/results/allocation"), { payload: VALID_PAYLOAD, updatedAt: 1 });
     });
   });
 
@@ -99,11 +111,21 @@ describe.skipIf(!emulatorHost)("firestore security rules", () => {
   it("students can submit a response while open, but cannot touch codeIndex", async () => {
     const student = env.authenticatedContext("anonuser").firestore();
     await assertSucceeds(
-      updateDoc(doc(student, "sessions/s1/students/hashA"), { response: "ct", submittedAt: 5 }),
+      updateDoc(doc(student, "sessions/s1/students/hashA"), { response: VALID_PAYLOAD, submittedAt: 5 }),
     );
     await assertFails(
-      updateDoc(doc(student, "sessions/s1/students/hashA"), { response: "ct", submittedAt: 5, codeIndex: 99 }),
+      updateDoc(doc(student, "sessions/s1/students/hashA"), { response: VALID_PAYLOAD, submittedAt: 5, codeIndex: 99 }),
     );
+    await assertFails(
+      updateDoc(doc(student, "sessions/s1/students/hashA"), { response: "not-an-envelope", submittedAt: 5 }),
+    );
+    await assertFails(
+      updateDoc(doc(student, "sessions/s1/students/hashA"), {
+        response: { ephemeralPublicKeyJwk: { kty: "EC" }, iv: "iv", ciphertext: "ct" },
+        submittedAt: 5,
+      }),
+    );
+    await assertSucceeds(updateDoc(doc(student, "sessions/s1/students/hashA"), { response: null, submittedAt: null }));
     await assertFails(deleteDoc(doc(student, "sessions/s1/students/hashA")));
   });
 
@@ -112,7 +134,7 @@ describe.skipIf(!emulatorHost)("firestore security rules", () => {
       await updateDoc(doc(ctx.firestore(), "sessions/s1"), { status: "closed" });
     });
     const student = env.authenticatedContext("anonuser").firestore();
-    await assertFails(updateDoc(doc(student, "sessions/s1/students/hashA"), { response: "ct", submittedAt: 5 }));
+    await assertFails(updateDoc(doc(student, "sessions/s1/students/hashA"), { response: VALID_PAYLOAD, submittedAt: 5 }));
   });
 
   it("anyone signed in can read the public survey config", async () => {

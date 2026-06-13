@@ -143,3 +143,45 @@ export function ErrorText({ children }: { children: ReactNode }) {
   if (!children) return null;
   return <p className="text-sm text-red-600">{children}</p>;
 }
+
+export function ConfirmDialog({
+  open,
+  title,
+  children,
+  confirmLabel,
+  cancelLabel = "Cancel",
+  tone = "danger",
+  busy = false,
+  onConfirm,
+  onCancel,
+}: {
+  open: boolean;
+  title: string;
+  children: ReactNode;
+  confirmLabel: string;
+  cancelLabel?: string;
+  tone?: "danger" | "primary";
+  busy?: boolean;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4">
+      <div className="w-full max-w-md rounded-lg border border-slate-200 bg-white p-4 shadow-xl">
+        <h2 className={`mb-2 text-lg font-semibold ${tone === "danger" ? "text-red-700" : "text-slate-950"}`}>
+          {title}
+        </h2>
+        <div className="space-y-2 text-sm text-slate-600">{children}</div>
+        <div className="mt-4 flex justify-end gap-2">
+          <Button type="button" variant="secondary" disabled={busy} onClick={onCancel}>
+            {cancelLabel}
+          </Button>
+          <Button type="button" variant={tone === "danger" ? "danger" : "primary"} disabled={busy} onClick={onConfirm}>
+            {busy ? "Working..." : confirmLabel}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
