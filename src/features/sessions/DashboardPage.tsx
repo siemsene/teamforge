@@ -41,6 +41,17 @@ export function DashboardPage() {
         <Button onClick={() => setCreating((v) => !v)}>{creating ? "Cancel" : "New session"}</Button>
       </div>
 
+      <Card className="bg-indigo-50">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="text-sm text-slate-700">
+            New to TeamForge? The instructor guide walks through the whole process with a worked example.
+          </p>
+          <a href="/instructor-guide.pdf" target="_blank" rel="noopener noreferrer">
+            <Button variant="secondary">Open instructor guide (PDF)</Button>
+          </a>
+        </div>
+      </Card>
+
       {creating && <NewSessionForm onDone={() => setCreating(false)} />}
 
       {!sessions ? (

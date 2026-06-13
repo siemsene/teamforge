@@ -47,11 +47,13 @@ service cloud.firestore {
         && request.resource.data.approved == false;
       allow get: if isAdmin() || (isSignedIn() && request.auth.uid == uid);
       allow list: if isAdmin();
-      // Only the admin can change the approved flag; users may edit their name.
+      // Admin can change anything (e.g. the approved flag). A user may only edit
+      // their own profile fields — never approved/email/createdAt — so the
+      // whitelist also keeps the approved flag out of a self-update.
       allow update: if isAdmin()
         || (isSignedIn()
             && request.auth.uid == uid
-            && request.resource.data.approved == resource.data.approved);
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["name", "university", "usage"]));
       allow delete: if isAdmin();
     }
 

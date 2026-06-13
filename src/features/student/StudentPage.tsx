@@ -139,6 +139,17 @@ function CodeEntry({
           </Button>
         </form>
       </Card>
+      <p className="text-center text-xs text-slate-500">
+        New here?{" "}
+        <a
+          className="text-indigo-600 hover:underline"
+          href="/student-guide.pdf"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          Read the student quick guide (PDF)
+        </a>
+      </p>
     </>
   );
 }

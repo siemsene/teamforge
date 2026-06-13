@@ -2,13 +2,15 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useSession } from "./SessionContext";
 import { deleteSessionCompletely, purgeStudentData } from "../../lib/db";
-import { Button, Card } from "../../components/ui";
+import { Button, Card, ErrorText } from "../../components/ui";
 
 export function PrivacyTab() {
   const { sid, session, students } = useSession();
   const navigate = useNavigate();
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
   async function purge() {
     if (
@@ -18,9 +20,13 @@ export function PrivacyTab() {
     )
       return;
     setBusy(true);
+    setError("");
+    setMessage("");
     try {
       const n = await purgeStudentData(sid);
       setMessage(`Deleted ${n} student records and the saved allocation.`);
+    } catch (e) {
+      setError(`Could not purge student data: ${errMsg(e)}`);
     } finally {
       setBusy(false);
     }
@@ -34,10 +40,12 @@ export function PrivacyTab() {
     )
       return;
     setBusy(true);
+    setError("");
     try {
       await deleteSessionCompletely(sid);
       navigate("/dashboard");
-    } finally {
+    } catch (e) {
+      setError(`Could not delete the session: ${errMsg(e)}`);
       setBusy(false);
     }
   }
@@ -88,6 +96,7 @@ export function PrivacyTab() {
             </Button>
           </div>
           {message && <p className="text-sm text-green-700">{message}</p>}
+          <ErrorText>{error}</ErrorText>
         </div>
       </Card>
     </div>

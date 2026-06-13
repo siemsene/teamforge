@@ -5,7 +5,7 @@ import { randomId } from "../../lib/util";
 import type { Question, QuestionKind } from "../../types";
 import { QUESTION_TEMPLATES, TEMPLATE_CATEGORIES } from "./questionTemplates";
 import { dedupeOptions } from "./autoQuestions";
-import { Badge, Button, Card, ErrorText, Field, Input, NumberInput, Select } from "../../components/ui";
+import { Badge, Button, Card, ErrorText, Field, Input, NumberInput, Select, TextArea } from "../../components/ui";
 
 const KIND_LABELS: Record<QuestionKind, string> = {
   number: "Numeric (scale)",
@@ -248,12 +248,7 @@ function QuestionForm({
             label="Options (one per line)"
             hint={isAutoSingle ? "Options coming from project requirements cannot be removed here." : undefined}
           >
-            <textarea
-              className="w-full rounded-md border border-slate-300 px-3 py-1.5 text-sm focus:border-indigo-500 focus:outline-none"
-              rows={4}
-              value={options}
-              onChange={(e) => setOptions(e.target.value)}
-            />
+            <TextArea rows={4} value={options} onChange={(e) => setOptions(e.target.value)} />
           </Field>
         )}
         {kind === "number" && (

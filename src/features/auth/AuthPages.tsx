@@ -10,12 +10,19 @@ import {
 import { auth, ADMIN_UID } from "../../lib/firebase";
 import { createInstructorProfile } from "../../lib/db";
 import { notifyAdminOfRegistration } from "../../lib/email";
+import { TeamForgeLogo } from "../../components/Brand";
 import { useAuth } from "./AuthContext";
 import { Button, Card, ErrorText, Field, Input, Spinner } from "../../components/ui";
 
 function AuthShell({ title, children }: { title: string; children: ReactNode }) {
   return (
     <div className="mx-auto mt-16 max-w-md px-4">
+      <Link
+        to="/"
+        className="mb-6 flex justify-center rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+      >
+        <TeamForgeLogo markClassName="h-10 w-10" textClassName="text-xl" subtitle="Student team allocation" />
+      </Link>
       <h1 className="mb-4 text-center text-2xl font-bold">{title}</h1>
       <Card>{children}</Card>
     </div>
@@ -197,6 +204,18 @@ export function RequireInstructor({ children }: { children: ReactNode }) {
         <p className="mb-3 text-sm text-slate-600">
           Your account is verified and is now waiting for manual approval by the site administrator. You will be able
           to create sessions once approved — check back soon.
+        </p>
+        <p className="mb-3 text-sm text-slate-600">
+          Meanwhile, you can read the{" "}
+          <a
+            className="text-indigo-600 hover:underline"
+            href="/instructor-guide.pdf"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            instructor guide (PDF)
+          </a>
+          .
         </p>
         <Button variant="ghost" onClick={() => signOut(auth)}>
           Sign out

@@ -9,6 +9,7 @@ import { DashboardPage } from "./features/sessions/DashboardPage";
 import { SessionPage } from "./features/sessions/SessionPage";
 import { StudentPage } from "./features/student/StudentPage";
 import { watchAllInstructors } from "./lib/db";
+import { TeamForgeLogo, TeamForgeMark } from "./components/Brand";
 import { Badge, Button, Card } from "./components/ui";
 
 function Header() {
@@ -29,8 +30,8 @@ function Header() {
   return (
     <header className="border-b border-slate-200 bg-white">
       <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-3">
-        <Link to="/" className="text-lg font-bold text-indigo-700">
-          TeamForge
+        <Link to="/" className="shrink-0 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2">
+          <TeamForgeLogo markClassName="h-9 w-9" textClassName="text-lg" subtitle="Team allocation" />
         </Link>
         <nav className="flex items-center gap-3 text-sm">
           {instructor ? (
@@ -45,6 +46,16 @@ function Header() {
                 <Link to="/dashboard" className="text-slate-600 hover:text-indigo-700">
                   My sessions
                 </Link>
+              )}
+              {!isAdmin && (
+                <a
+                  href="/instructor-guide.pdf"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-slate-600 hover:text-indigo-700"
+                >
+                  Guide
+                </a>
               )}
               <span className="hidden text-slate-400 sm:inline">{profile?.name ?? user.email}</span>
               <Button variant="secondary" onClick={() => signOut(auth)}>
@@ -71,8 +82,9 @@ function LandingPage() {
   return (
     <div className="mx-auto max-w-3xl space-y-6 px-4 py-12">
       <div className="text-center">
-        <h1 className="text-3xl font-bold">TeamForge</h1>
-        <p className="mt-2 text-lg text-slate-600">
+        <TeamForgeMark className="mx-auto mb-4 h-20 w-20" title="TeamForge logo" />
+        <h1 className="text-4xl font-bold text-slate-950">TeamForge</h1>
+        <p className="mx-auto mt-2 max-w-2xl text-lg text-slate-600">
           Privacy-preserving student team allocation: build a survey, collect anonymous responses, and let an
           optimizer form balanced teams.
         </p>
@@ -101,8 +113,8 @@ function LandingPage() {
         <ul className="list-disc space-y-1 pl-5 text-sm text-slate-700">
           <li>Students are identified only by random login codes — the platform never learns names or emails.</li>
           <li>
-            Survey answers are <strong>encrypted in your browser</strong> before upload. Only the instructor holds the
-            key; not even the database administrator can read responses.
+            Survey answers are <strong>encrypted in your browser</strong> before upload, so the server only ever
+            stores ciphertext. The decryption key is never sent to the server — only the instructor can read responses.
           </li>
           <li>Team optimization runs entirely inside the instructor's browser — data never leaves it decrypted.</li>
           <li>Instructors can permanently erase all student data of a session at any time, with one click.</li>

@@ -186,6 +186,10 @@ export function AllocationTab() {
   }
 
   const submittedCount = solverStudents?.filter((s) => s.submitted).length ?? 0;
+  // The model has one binary per (student, team); very large instances may not
+  // reach a proven optimum within the time limit.
+  const numVars = students.length * teams.length;
+  const largeProblem = numVars > 6000;
 
   return (
     <div className="space-y-4">
@@ -227,6 +231,13 @@ export function AllocationTab() {
         {info && <p className="mt-2 text-sm text-green-700">{info}</p>}
         {teams.length === 0 && (
           <p className="mt-2 text-sm text-amber-700">Define projects first (or mark the session as generic).</p>
+        )}
+        {largeProblem && phase.name !== "solving" && (
+          <p className="mt-2 text-sm text-amber-700">
+            Large problem ({students.length} students × {teams.length} teams ≈ {numVars.toLocaleString()} variables).
+            The optimizer may not reach a proven optimum within the time limit — raise the limit, accept a good-enough
+            result, or use fewer teams.
+          </p>
         )}
       </Card>
 

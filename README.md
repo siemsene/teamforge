@@ -8,7 +8,13 @@ Privacy-preserving student team allocation. Instructors build a survey, students
 - **End-to-end encryption.** Survey answers are encrypted in the student's browser with the session's public key (ECDH P-256 + AES-256-GCM). The private key is stored only in passphrase-wrapped form — the database administrator cannot read responses. Decryption and team optimization happen exclusively in the instructor's browser; the saved allocation is encrypted too.
 - **Key recovery.** A recovery key file is offered at session creation. Losing both the passphrase and recovery key makes the data permanently unreadable — by design.
 - **Right to erasure.** One click purges all student records and allocations of a session (Privacy & data tab).
-- No analytics, no tracking, no third-party scripts.
+- No analytics, no tracking, no third-party scripts. The only outbound third-party request is an optional admin-notification email on **instructor** registration (Web3Forms); student-facing pages talk only to Firebase.
+
+### Threat model (what the encryption does and doesn't guarantee)
+
+Encryption protects student responses against anyone who can read the **stored data** — including the platform/database operator inspecting Firestore, or a database breach. The decryption key (passphrase / recovery key) is never sent to the server; the private key is stored only in wrapped form.
+
+As with all browser-delivered encryption, the guarantee assumes the **served application code is honest**: an operator who tampers with the deployed frontend could capture answers in the student's browser before they are encrypted, or capture an instructor's passphrase. Mitigate by deploying from reviewed, pinned builds to hosting you and your instructors trust. This is why the in-app copy is scoped to "the server stores only ciphertext / the key is never sent to the server" rather than an absolute "nobody can ever read responses."
 
 ## Stack
 
@@ -45,6 +51,19 @@ npm run dev
 
 ```sh
 npm test   # crypto round-trips, login codes, MIP solver correctness & scale
+```
+
+### Guides (PDF)
+
+Two generated PDFs live in `public/`:
+
+- `instructor-guide.pdf` — full handbook, linked from the header, dashboard, and awaiting-approval screen.
+- `student-guide.pdf` — one-page quick guide, linked from the survey login screen.
+
+Regenerate both after changing the workflow or their content:
+
+```sh
+npm run docs   # runs scripts/generate-{instructor,student}-guide.mjs
 ```
 
 ## How a session works

@@ -4,9 +4,11 @@ import { useSession } from "./SessionContext";
 import { deleteSessionCompletely, updatePublicConfig, updateSession } from "../../lib/db";
 import { surveyUrl } from "../../lib/util";
 import type { SessionStatus } from "../../types";
-import { Button, Card, TextArea } from "../../components/ui";
+import { Button, Card, ErrorText, TextArea } from "../../components/ui";
 
-async function setStatus(sid: string, status: SessionStatus) {
+const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+async function applyStatus(sid: string, status: SessionStatus) {
   await updateSession(sid, { status });
   await updatePublicConfig(sid, { status });
 }
@@ -36,6 +38,7 @@ export function OverviewTab() {
   const fallback = defaultEmailTemplate(session.title, link);
   const [template, setTemplate] = useState(session.emailTemplate ?? fallback);
   const [savedMsg, setSavedMsg] = useState("");
+  const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const dirty = template !== (session.emailTemplate ?? fallback);
 
@@ -45,12 +48,24 @@ export function OverviewTab() {
     setTimeout(() => setCopied(""), 1500);
   }
 
+  async function changeStatus(status: SessionStatus) {
+    setError("");
+    try {
+      await applyStatus(sid, status);
+    } catch (e) {
+      setError(`Could not change status: ${errMsg(e)}`);
+    }
+  }
+
   async function saveTemplate() {
     setBusy(true);
+    setError("");
     try {
       await updateSession(sid, { emailTemplate: template });
       setSavedMsg("Email template saved.");
       setTimeout(() => setSavedMsg(""), 1500);
+    } catch (e) {
+      setError(`Could not save the email template: ${errMsg(e)}`);
     } finally {
       setBusy(false);
     }
@@ -64,10 +79,12 @@ export function OverviewTab() {
     )
       return;
     setBusy(true);
+    setError("");
     try {
       await deleteSessionCompletely(sid);
       navigate("/dashboard");
-    } finally {
+    } catch (e) {
+      setError(`Could not delete the session: ${errMsg(e)}`);
       setBusy(false);
     }
   }
@@ -86,12 +103,13 @@ export function OverviewTab() {
             <Button
               key={s}
               variant={session.status === s ? "primary" : "secondary"}
-              onClick={() => setStatus(sid, s)}
+              onClick={() => changeStatus(s)}
             >
               {s}
             </Button>
           ))}
         </div>
+        <ErrorText>{error}</ErrorText>
       </Card>
 
       <Card>

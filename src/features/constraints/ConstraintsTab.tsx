@@ -38,6 +38,7 @@ export function describeConstraint(c: Constraint, questions: Question[]): string
 export function ConstraintsTab() {
   const { sid, session, publicConfig, projects } = useSession();
   const [adding, setAdding] = useState(false);
+  const [actionError, setActionError] = useState("");
   const constraints = session.constraints;
   const questions = publicConfig.questions;
 
@@ -65,19 +66,26 @@ export function ConstraintsTab() {
       make: () => ({ id: randomId(8), kind: "projectPreference", weight: "important" }),
     });
 
+  async function persist(next: Constraint[], onOk?: () => void) {
+    setActionError("");
+    try {
+      await updateSession(sid, { constraints: next });
+      onOk?.();
+    } catch (e) {
+      setActionError(`Could not save constraints: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
   async function save(constraint: Constraint) {
-    await updateSession(sid, { constraints: [...constraints, constraint] });
-    setAdding(false);
+    await persist([...constraints, constraint], () => setAdding(false));
   }
 
   async function remove(id: string) {
-    await updateSession(sid, { constraints: constraints.filter((c) => c.id !== id) });
+    await persist(constraints.filter((c) => c.id !== id));
   }
 
   async function setWeight(id: string, weight: ConstraintWeight) {
-    await updateSession(sid, {
-      constraints: constraints.map((c) => (c.id === id ? { ...c, weight } : c)),
-    });
+    await persist(constraints.map((c) => (c.id === id ? { ...c, weight } : c)));
   }
 
   return (
@@ -89,6 +97,8 @@ export function ConstraintsTab() {
         </p>
         <Button onClick={() => setAdding((v) => !v)}>{adding ? "Cancel" : "Add constraint"}</Button>
       </div>
+
+      <ErrorText>{actionError}</ErrorText>
 
       {adding && <ConstraintForm questions={questions} onSave={save} />}
 

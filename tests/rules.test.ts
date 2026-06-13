@@ -129,6 +129,19 @@ describe.skipIf(!emulatorHost)("firestore security rules", () => {
     await assertSucceeds(updateDoc(doc(admin, "users/newbie"), { approved: true }));
   });
 
+  it("a user may edit only their own profile fields (name/university/usage)", async () => {
+    const self = env.authenticatedContext("newbie").firestore();
+    // Whitelisted fields are allowed.
+    await assertSucceeds(updateDoc(doc(self, "users/newbie"), { name: "New Name", university: "State U" }));
+    await assertSucceeds(
+      updateDoc(doc(self, "users/newbie"), { usage: { sessions: 2, students: 40, updatedAt: 1 } }),
+    );
+    // Non-whitelisted fields are rejected, even alongside an allowed one.
+    await assertFails(updateDoc(doc(self, "users/newbie"), { email: "evil@x.edu" }));
+    await assertFails(updateDoc(doc(self, "users/newbie"), { name: "X", approved: true }));
+    await assertFails(updateDoc(doc(self, "users/newbie"), { createdAt: 0 }));
+  });
+
   it("registration must start unapproved", async () => {
     const fresh = env.authenticatedContext("fresh").firestore();
     await assertFails(
