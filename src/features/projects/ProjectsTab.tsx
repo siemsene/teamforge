@@ -4,7 +4,7 @@ import { deleteProject, saveProject, updatePublicConfig } from "../../lib/db";
 import { syncAutoQuestions, slugify } from "../survey-builder/autoQuestions";
 import { randomId } from "../../lib/util";
 import type { Project, ProjectRequirement } from "../../types";
-import { Badge, Button, Card, ErrorText, Field, Input, TextArea } from "../../components/ui";
+import { Badge, Button, Card, ErrorText, Field, Input, NumberInput, TextArea } from "../../components/ui";
 
 export function ProjectsTab() {
   const { sid, session, projects, publicConfig } = useSession();
@@ -185,12 +185,11 @@ function ProjectForm({
                 <Input value={r.value} placeholder="Computer Science" onChange={(e) => setReq(i, { value: e.target.value })} />
               </Field>
               <Field label="Min count">
-                <Input
-                  type="number"
+                <NumberInput
                   min={1}
                   className="w-20"
                   value={r.minCount}
-                  onChange={(e) => setReq(i, { minCount: +e.target.value })}
+                  onValueChange={(n) => setReq(i, { minCount: n })}
                 />
               </Field>
               <Button type="button" variant="ghost" onClick={() => setRequirements((reqs) => reqs.filter((_, j) => j !== i))}>

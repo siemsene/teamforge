@@ -3,7 +3,7 @@ import { useSession } from "../sessions/SessionContext";
 import { updatePublicConfig } from "../../lib/db";
 import { randomId } from "../../lib/util";
 import type { Question, QuestionKind } from "../../types";
-import { Badge, Button, Card, ErrorText, Field, Input, Select } from "../../components/ui";
+import { Badge, Button, Card, ErrorText, Field, Input, NumberInput, Select } from "../../components/ui";
 
 const KIND_LABELS: Record<QuestionKind, string> = {
   number: "Numeric (scale)",
@@ -214,16 +214,16 @@ function QuestionForm({
         {kind === "number" && (
           <div className="flex gap-3">
             <Field label="Min">
-              <Input type="number" className="w-24" value={min} onChange={(e) => setMin(+e.target.value)} />
+              <NumberInput className="w-24" value={min} onValueChange={setMin} />
             </Field>
             <Field label="Max">
-              <Input type="number" className="w-24" value={max} onChange={(e) => setMax(+e.target.value)} />
+              <NumberInput className="w-24" value={max} onValueChange={setMax} />
             </Field>
           </div>
         )}
         {kind === "projectRanking" && (
           <Field label="How many projects must students rank?">
-            <Input type="number" className="w-24" min={1} value={rankCount} onChange={(e) => setRankCount(+e.target.value)} />
+            <NumberInput className="w-24" min={1} value={rankCount} onValueChange={setRankCount} />
           </Field>
         )}
         {kind === "teammates" && (
@@ -231,7 +231,7 @@ function QuestionForm({
             label="Max teammate codes"
             hint="Students list login codes of classmates they want to work with (they exchange codes themselves)."
           >
-            <Input type="number" className="w-24" min={1} max={10} value={maxCodes} onChange={(e) => setMaxCodes(+e.target.value)} />
+            <NumberInput className="w-24" min={1} max={10} value={maxCodes} onValueChange={setMaxCodes} />
           </Field>
         )}
         <label className="flex items-center gap-2 text-sm">

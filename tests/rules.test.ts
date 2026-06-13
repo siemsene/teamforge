@@ -10,7 +10,7 @@ import {
   initializeTestEnvironment,
   type RulesTestEnvironment,
 } from "@firebase/rules-unit-testing";
-import { deleteDoc, doc, getDoc, getDocs, collection, setDoc, updateDoc } from "firebase/firestore";
+import { deleteDoc, doc, getDoc, getDocs, collection, setDoc, updateDoc, writeBatch } from "firebase/firestore";
 
 const emulatorHost = process.env.FIRESTORE_EMULATOR_HOST;
 const rules = readFileSync("firestore.rules", "utf8");
@@ -56,6 +56,29 @@ describe.skipIf(!emulatorHost)("firestore security rules", () => {
   it("instructors cannot create sessions owned by someone else", async () => {
     const owner = env.authenticatedContext("owner1").firestore();
     await assertFails(setDoc(doc(owner, "sessions/spoof"), { ownerUid: "victim", status: "draft" }));
+  });
+
+  // Regression for the "Missing or insufficient permissions" bug on session
+  // creation. The public/config write rule calls ownsSession(), which get()s the
+  // parent session doc — and rule get()s never see sibling writes in the same
+  // batch. Bundling the session doc with public/config therefore fails even for
+  // an approved owner; createSession() must commit the session doc first.
+  it("rejects creating the session doc and public/config in one batch", async () => {
+    const owner = env.authenticatedContext("owner1").firestore();
+    const batch = writeBatch(owner);
+    batch.set(doc(owner, "sessions/screate"), { ownerUid: "owner1", status: "draft", title: "T" });
+    batch.set(doc(owner, "sessions/screate/public/config"), { title: "T", status: "draft" });
+    await assertFails(batch.commit());
+  });
+
+  it("allows the split write createSession uses: session doc first, then public/config and students", async () => {
+    const owner = env.authenticatedContext("owner1").firestore();
+    await assertSucceeds(setDoc(doc(owner, "sessions/screate"), { ownerUid: "owner1", status: "draft", title: "T" }));
+    await assertSucceeds(setDoc(doc(owner, "sessions/screate/public/config"), { title: "T", status: "draft" }));
+    const batch = writeBatch(owner);
+    batch.set(doc(owner, "sessions/screate/students/h1"), { codeIndex: 1, submittedAt: null, response: null });
+    batch.set(doc(owner, "sessions/screate/students/h2"), { codeIndex: 2, submittedAt: null, response: null });
+    await assertSucceeds(batch.commit());
   });
 
   it("non-owners cannot read a session or its results", async () => {

@@ -7,7 +7,7 @@ import { generateCodes, hashCode } from "../../lib/codes";
 import { downloadFile, randomId, surveyUrl, toCsv } from "../../lib/util";
 import { DEFAULT_PRIVACY_NOTE } from "./privacyNote";
 import type { PublicConfig, SessionDoc, SessionSummary } from "../../types";
-import { Badge, Button, Card, ErrorText, Field, Input, Spinner } from "../../components/ui";
+import { Badge, Button, Card, ErrorText, Field, Input, NumberInput, Spinner } from "../../components/ui";
 
 const STATUS_TONE = { draft: "gray", open: "green", closed: "amber" } as const;
 
@@ -68,7 +68,16 @@ function NewSessionForm({ onDone }: { onDone: () => void }) {
   const [idealTeamSize, setIdealTeamSize] = useState(5);
   const [minTeamSize, setMinTeamSize] = useState(4);
   const [maxTeamSize, setMaxTeamSize] = useState(6);
+  // Min/max track ideal ±1 until the instructor edits them directly.
+  const [minTouched, setMinTouched] = useState(false);
+  const [maxTouched, setMaxTouched] = useState(false);
   const [genericProjects, setGenericProjects] = useState(false);
+
+  function handleIdealChange(n: number) {
+    setIdealTeamSize(n);
+    if (!minTouched) setMinTeamSize(Math.max(1, n - 1));
+    if (!maxTouched) setMaxTeamSize(n + 1);
+  }
   const [passphrase, setPassphrase] = useState("");
   const [passphrase2, setPassphrase2] = useState("");
   const [error, setError] = useState("");
@@ -162,16 +171,30 @@ function NewSessionForm({ onDone }: { onDone: () => void }) {
         </Field>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           <Field label="Students">
-            <Input type="number" min={2} max={1000} value={numStudents} onChange={(e) => setNumStudents(+e.target.value)} />
+            <NumberInput min={2} max={1000} value={numStudents} onValueChange={setNumStudents} />
           </Field>
           <Field label="Ideal team size">
-            <Input type="number" min={1} value={idealTeamSize} onChange={(e) => setIdealTeamSize(+e.target.value)} />
+            <NumberInput min={1} value={idealTeamSize} onValueChange={handleIdealChange} />
           </Field>
           <Field label="Min team size">
-            <Input type="number" min={1} value={minTeamSize} onChange={(e) => setMinTeamSize(+e.target.value)} />
+            <NumberInput
+              min={1}
+              value={minTeamSize}
+              onValueChange={(n) => {
+                setMinTouched(true);
+                setMinTeamSize(n);
+              }}
+            />
           </Field>
           <Field label="Max team size">
-            <Input type="number" min={1} value={maxTeamSize} onChange={(e) => setMaxTeamSize(+e.target.value)} />
+            <NumberInput
+              min={1}
+              value={maxTeamSize}
+              onValueChange={(n) => {
+                setMaxTouched(true);
+                setMaxTeamSize(n);
+              }}
+            />
           </Field>
         </div>
         <label className="flex items-center gap-2 text-sm">

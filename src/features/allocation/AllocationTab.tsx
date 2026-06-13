@@ -7,7 +7,7 @@ import { downloadFile, toCsv } from "../../lib/util";
 import { evaluateAssignment } from "../../solver/evaluate";
 import type { SolveResult, SolverInput, SolverStudent, SolverTeam, WorkerResponse } from "../../solver/types";
 import type { Allocation, SurveyAnswers } from "../../types";
-import { Button, Card, ErrorText, Field, Input, Spinner } from "../../components/ui";
+import { Button, Card, ErrorText, Field, Input, NumberInput, Spinner } from "../../components/ui";
 import { TeamBoard } from "./TeamBoard";
 
 type Phase =
@@ -195,13 +195,12 @@ export function AllocationTab() {
             </p>
           </div>
           <Field label="Solver time limit (s)">
-            <Input
-              type="number"
+            <NumberInput
               min={5}
               max={600}
               className="w-24"
               value={timeLimit}
-              onChange={(e) => setTimeLimit(+e.target.value)}
+              onValueChange={setTimeLimit}
             />
           </Field>
           {phase.name === "solving" ? (

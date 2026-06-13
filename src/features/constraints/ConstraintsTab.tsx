@@ -3,7 +3,7 @@ import { useSession } from "../sessions/SessionContext";
 import { updateSession } from "../../lib/db";
 import { randomId } from "../../lib/util";
 import type { Constraint, ConstraintWeight, Question } from "../../types";
-import { Badge, Button, Card, ErrorText, Field, Input, Select } from "../../components/ui";
+import { Badge, Button, Card, ErrorText, Field, NumberInput, Select } from "../../components/ui";
 
 const WEIGHT_LABEL: Record<ConstraintWeight, string> = {
   must: "Must hold",
@@ -225,10 +225,10 @@ function ConstraintForm({
               </Select>
             </Field>
             <Field label="Counts as capable if ≥">
-              <Input type="number" value={threshold} onChange={(e) => setThreshold(+e.target.value)} />
+              <NumberInput value={threshold} onValueChange={setThreshold} />
             </Field>
             <Field label="Min capable per team">
-              <Input type="number" min={1} value={minCount} onChange={(e) => setMinCount(+e.target.value)} />
+              <NumberInput min={1} value={minCount} onValueChange={setMinCount} />
             </Field>
           </div>
         )}

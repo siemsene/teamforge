@@ -64,11 +64,16 @@ export async function createSession(
   publicConfig: PublicConfig,
   codeHashes: string[],
 ): Promise<void> {
+  // The session doc must be committed first and on its own: the rules for the
+  // public/config doc (and the student docs below) call ownsSession(sid), which
+  // does a get() on sessions/{sid}. Security-rule get()/exists() see only
+  // committed data, never sibling writes in the same batch — so bundling the
+  // session doc with its public/config would make that get() find nothing and
+  // the whole batch would fail with "Missing or insufficient permissions".
+  await setDoc(doc(db, "sessions", sid), session);
+  await setDoc(doc(db, "sessions", sid, "public", "config"), publicConfig);
+
   // Firestore batches cap at 500 writes; chunk the student docs.
-  const first = writeBatch(db);
-  first.set(doc(db, "sessions", sid), session);
-  first.set(doc(db, "sessions", sid, "public", "config"), publicConfig);
-  await first.commit();
 
   for (let i = 0; i < codeHashes.length; i += 450) {
     const batch = writeBatch(db);

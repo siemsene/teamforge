@@ -1,4 +1,5 @@
-import { Link, Route, Routes } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { Link, Navigate, Route, Routes } from "react-router-dom";
 import { signOut } from "firebase/auth";
 import { auth } from "./lib/firebase";
 import { useAuth } from "./features/auth/AuthContext";
@@ -7,11 +8,24 @@ import { AdminPage } from "./features/admin/AdminPage";
 import { DashboardPage } from "./features/sessions/DashboardPage";
 import { SessionPage } from "./features/sessions/SessionPage";
 import { StudentPage } from "./features/student/StudentPage";
-import { Button, Card } from "./components/ui";
+import { watchAllInstructors } from "./lib/db";
+import { Badge, Button, Card } from "./components/ui";
 
 function Header() {
   const { user, profile, isAdmin } = useAuth();
   const instructor = user && !user.isAnonymous;
+
+  // Backstop for the email notification: show how many instructors are awaiting
+  // review so the admin sees it on every page, even if a notification is missed.
+  const [pendingCount, setPendingCount] = useState(0);
+  useEffect(() => {
+    if (!isAdmin) {
+      setPendingCount(0);
+      return;
+    }
+    return watchAllInstructors((rows) => setPendingCount(rows.filter((r) => !r.approved).length));
+  }, [isAdmin]);
+
   return (
     <header className="border-b border-slate-200 bg-white">
       <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-3">
@@ -21,12 +35,15 @@ function Header() {
         <nav className="flex items-center gap-3 text-sm">
           {instructor ? (
             <>
-              <Link to="/dashboard" className="text-slate-600 hover:text-indigo-700">
-                My sessions
-              </Link>
-              {isAdmin && (
-                <Link to="/admin" className="text-slate-600 hover:text-indigo-700">
+              {isAdmin ? (
+                // The admin manages approvals only; they don't own sessions.
+                <Link to="/admin" className="flex items-center gap-1.5 text-slate-600 hover:text-indigo-700">
                   Admin
+                  {pendingCount > 0 && <Badge tone="red">{pendingCount}</Badge>}
+                </Link>
+              ) : (
+                <Link to="/dashboard" className="text-slate-600 hover:text-indigo-700">
+                  My sessions
                 </Link>
               )}
               <span className="hidden text-slate-400 sm:inline">{profile?.name ?? user.email}</span>
@@ -96,12 +113,18 @@ function LandingPage() {
   );
 }
 
+function HomeRoute() {
+  const { isAdmin } = useAuth();
+  // The admin's default view is the approval panel, not the marketing landing.
+  return isAdmin ? <Navigate to="/admin" replace /> : <LandingPage />;
+}
+
 export default function App() {
   return (
     <div className="min-h-screen">
       <Header />
       <Routes>
-        <Route path="/" element={<LandingPage />} />
+        <Route path="/" element={<HomeRoute />} />
         <Route path="/signup" element={<SignUpPage />} />
         <Route path="/signin" element={<SignInPage />} />
         <Route path="/admin" element={<AdminPage />} />

@@ -7,8 +7,9 @@ import {
   signInWithEmailAndPassword,
   signOut,
 } from "firebase/auth";
-import { auth } from "../../lib/firebase";
+import { auth, ADMIN_UID } from "../../lib/firebase";
 import { createInstructorProfile } from "../../lib/db";
+import { notifyAdminOfRegistration } from "../../lib/email";
 import { useAuth } from "./AuthContext";
 import { Button, Card, ErrorText, Field, Input, Spinner } from "../../components/ui";
 
@@ -37,6 +38,8 @@ export function SignUpPage() {
     try {
       const cred = await createUserWithEmailAndPassword(auth, email.trim(), password);
       await createInstructorProfile(cred.user.uid, name.trim(), email.trim());
+      // Fire-and-forget: a failed notification must not block registration.
+      void notifyAdminOfRegistration(name.trim(), email.trim());
       await sendEmailVerification(cred.user);
       navigate("/dashboard");
     } catch (err) {
@@ -86,8 +89,8 @@ export function SignInPage() {
     setError("");
     setBusy(true);
     try {
-      await signInWithEmailAndPassword(auth, email.trim(), password);
-      navigate("/dashboard");
+      const cred = await signInWithEmailAndPassword(auth, email.trim(), password);
+      navigate(cred.user.uid === ADMIN_UID ? "/admin" : "/dashboard");
     } catch {
       setError("Sign-in failed. Check your email and password.");
     } finally {

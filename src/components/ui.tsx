@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from "react";
 import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode, SelectHTMLAttributes, TextareaHTMLAttributes } from "react";
 
 export function Button({
@@ -24,6 +25,55 @@ export function Input({ className = "", ...props }: InputHTMLAttributes<HTMLInpu
     <input
       className={`w-full rounded-md border border-slate-300 px-3 py-1.5 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 ${className}`}
       {...props}
+    />
+  );
+}
+
+/**
+ * Number input that holds its own text while editing, so clearing the field
+ * doesn't snap to a forced 0 (and then strand a leading zero when you type).
+ * It emits a number via onValueChange only for non-empty input, re-syncs when
+ * `value` is changed programmatically, and restores the last value on blur if
+ * left empty.
+ */
+export function NumberInput({
+  value,
+  onValueChange,
+  ...props
+}: Omit<InputHTMLAttributes<HTMLInputElement>, "value" | "onChange" | "type"> & {
+  value: number;
+  onValueChange: (n: number) => void;
+}) {
+  const [text, setText] = useState(() => (Number.isFinite(value) ? String(value) : ""));
+  const lastEmitted = useRef(value);
+
+  // Re-sync when the value changes from outside (e.g. min/max tracking ideal),
+  // but not in response to our own emit (which would fight manual editing).
+  useEffect(() => {
+    if (value !== lastEmitted.current) {
+      setText(Number.isFinite(value) ? String(value) : "");
+      lastEmitted.current = value;
+    }
+  }, [value]);
+
+  return (
+    <Input
+      {...props}
+      type="number"
+      value={text}
+      onChange={(e) => {
+        const t = e.target.value;
+        setText(t);
+        if (t !== "") {
+          const n = Number(t);
+          lastEmitted.current = n;
+          onValueChange(n);
+        }
+      }}
+      onBlur={(e) => {
+        if (e.target.value === "") setText(Number.isFinite(value) ? String(value) : "");
+        props.onBlur?.(e);
+      }}
     />
   );
 }
