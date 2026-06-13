@@ -2,8 +2,8 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useSession } from "../sessions/SessionContext";
 import { getAllocationDoc, saveAllocation } from "../../lib/db";
 import { eciesDecrypt, eciesEncrypt, unlockWithPassphrase, unlockWithRecoveryKey } from "../../lib/crypto";
-import { hashCode } from "../../lib/codes";
-import { downloadFile, toCsv } from "../../lib/util";
+import { normalizeCode } from "../../lib/codes";
+import { downloadFile, sessionFilename, toCsv } from "../../lib/util";
 import { evaluateAssignment } from "../../solver/evaluate";
 import type { SolveResult, SolverInput, SolverStudent, SolverTeam, WorkerResponse } from "../../solver/types";
 import type { Allocation, SurveyAnswers } from "../../types";
@@ -73,17 +73,20 @@ export function AllocationTab() {
     setError("");
     try {
       const teammatesQ = publicConfig.questions.find((q) => q.kind === "teammates");
+      // Students list classmates by their public share code; map those to the
+      // classmate's student hash so the solver can pair them.
+      const shareToHash = new Map(
+        students.filter((s) => s.shareCode).map((s) => [normalizeCode(s.shareCode!), s.hash]),
+      );
       const decrypted: SolverStudent[] = [];
       for (const s of students) {
         let answers: SurveyAnswers = {};
         if (s.response) {
           answers = JSON.parse(await eciesDecrypt(privateKey, s.response)) as SurveyAnswers;
-          // Convert teammate login codes to student hashes so the solver can
-          // match them without ever seeing plaintext codes elsewhere.
           if (teammatesQ && Array.isArray(answers[teammatesQ.id])) {
-            answers[teammatesQ.id] = await Promise.all(
-              (answers[teammatesQ.id] as string[]).map((code) => hashCode(code)),
-            );
+            answers[teammatesQ.id] = (answers[teammatesQ.id] as string[])
+              .map((code) => shareToHash.get(normalizeCode(code)))
+              .filter((h): h is string => Boolean(h));
           }
         }
         decrypted.push({ hash: s.hash, codeIndex: s.codeIndex, answers, submitted: !!s.submittedAt });
@@ -170,7 +173,7 @@ export function AllocationTab() {
         if (s) rows.push([t.name, s.codeIndex]);
       }
     }
-    downloadFile(`${sid}-teams.csv`, toCsv(rows), "text/csv");
+    downloadFile(sessionFilename(session.title, sid, "teams.csv"), toCsv(rows), "text/csv");
   }
 
   // ---------- render ----------

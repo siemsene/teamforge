@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { generateCodes, hashCode, normalizeCode } from "../src/lib/codes";
+import { generateCodes, generateShareCodes, hashCode, normalizeCode } from "../src/lib/codes";
 
 describe("login codes", () => {
   it("generates the requested number of unique codes", () => {
@@ -17,5 +17,11 @@ describe("login codes", () => {
   it("hashing is stable across formatting differences", async () => {
     expect(await hashCode("abc12-de345")).toBe(await hashCode("ABC12DE345"));
     expect(await hashCode("AAAAA-AAAAA")).not.toBe(await hashCode("AAAAA-AAAAB"));
+  });
+
+  it("generates unique 4-char share codes from the unambiguous alphabet", () => {
+    const shareCodes = generateShareCodes(300);
+    expect(new Set(shareCodes).size).toBe(300);
+    for (const sc of shareCodes) expect(sc).toMatch(/^[0-9A-HJKMNP-TV-Z]{4}$/);
   });
 });

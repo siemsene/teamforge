@@ -5,8 +5,20 @@ export type SessionStatus = "draft" | "open" | "closed";
 export interface InstructorProfile {
   name: string;
   email: string;
+  /** Institution the instructor works for (collected at sign-up). */
+  university: string;
   approved: boolean;
   createdAt: number;
+  /** Rough data-usage summary, refreshed by the instructor's dashboard, so the
+   * admin can see who to remind about cleaning up old sessions. */
+  usage?: InstructorUsage;
+}
+
+export interface InstructorUsage {
+  sessions: number;
+  /** Total student capacity across the instructor's sessions. */
+  students: number;
+  updatedAt: number;
 }
 
 // ---------- Survey questions ----------
@@ -28,6 +40,8 @@ export interface NumberQuestion extends QuestionBase {
   kind: "number";
   min: number;
   max: number;
+  /** Optional word per point; labels[i] describes value (min + i). Length max-min+1. */
+  labels?: string[];
 }
 
 export interface SingleChoiceQuestion extends QuestionBase {
@@ -180,6 +194,8 @@ export interface SessionDoc {
   numTeams: number;
   constraints: Constraint[];
   wrappedKeys: WrappedKeys;
+  /** Instructor-editable invitation email shown on the overview tab. */
+  emailTemplate?: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -201,6 +217,9 @@ export interface PublicConfig {
 
 export interface StudentDoc {
   codeIndex: number;
+  /** Public identifier the student shares with classmates to be listed as a
+   * preferred teammate. Independent of the (secret) login code. */
+  shareCode?: string;
   submittedAt: number | null;
   response: EciesPayload | null;
 }

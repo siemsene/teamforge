@@ -3,6 +3,7 @@ import { useSession } from "../sessions/SessionContext";
 import { updatePublicConfig } from "../../lib/db";
 import { randomId } from "../../lib/util";
 import type { Question, QuestionKind } from "../../types";
+import { QUESTION_TEMPLATES, TEMPLATE_CATEGORIES } from "./questionTemplates";
 import { Badge, Button, Card, ErrorText, Field, Input, NumberInput, Select } from "../../components/ui";
 
 const KIND_LABELS: Record<QuestionKind, string> = {
@@ -96,7 +97,10 @@ export function SurveyTab() {
               </div>
               <p className="mt-1 text-sm text-slate-500">
                 {KIND_LABELS[q.kind]}
-                {q.kind === "number" && ` · ${q.min}–${q.max}`}
+                {q.kind === "number" &&
+                  ` · ${q.min}–${q.max}${
+                    q.labels?.length ? ` (${q.labels[0]}…${q.labels[q.labels.length - 1]})` : ""
+                  }`}
                 {(q.kind === "single" || q.kind === "multi") && ` · ${q.options.join(", ")}`}
                 {q.kind === "projectRanking" && ` · rank top ${q.rankCount}`}
                 {q.kind === "teammates" && ` · up to ${q.maxCodes} codes`}
@@ -148,11 +152,32 @@ function QuestionForm({
   );
   const [min, setMin] = useState(initial?.kind === "number" ? initial.min : 1);
   const [max, setMax] = useState(initial?.kind === "number" ? initial.max : 5);
+  const [labels, setLabels] = useState<string[]>(initial?.kind === "number" ? (initial.labels ?? []) : []);
   const [rankCount, setRankCount] = useState(initial?.kind === "projectRanking" ? initial.rankCount : 3);
   const [maxCodes, setMaxCodes] = useState(initial?.kind === "teammates" ? initial.maxCodes : 3);
+  const [templateId, setTemplateId] = useState("");
   const [error, setError] = useState("");
 
   const isAutoSingle = !!initial?.auto && initial.kind === "single";
+
+  function applyTemplate(id: string) {
+    setTemplateId(id);
+    const t = QUESTION_TEMPLATES.find((x) => x.id === id);
+    if (!t) return;
+    const body = t.body;
+    setKind(body.kind);
+    setPrompt(t.prompt);
+    setRequired(t.required);
+    if (body.kind === "number") {
+      setMin(body.min);
+      setMax(body.max);
+      setLabels(body.labels);
+    } else if (body.kind === "teammates") {
+      setMaxCodes(body.maxCodes);
+    } else {
+      setOptions(body.options.join("\n"));
+    }
+  }
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -164,7 +189,10 @@ function QuestionForm({
     let q: Question;
     if (kind === "number") {
       if (min >= max) return setError("Min must be below max.");
-      q = { ...base, kind, min, max };
+      // One label per point; drop the field entirely if the instructor left them blank.
+      const pointLabels = Array.from({ length: max - min + 1 }, (_, i) => (labels[i] ?? "").trim());
+      const hasLabels = pointLabels.some(Boolean);
+      q = { ...base, kind, min, max, ...(hasLabels ? { labels: pointLabels } : {}) };
     } else if (kind === "single" || kind === "multi") {
       const opts = options
         .split("\n")
@@ -185,6 +213,25 @@ function QuestionForm({
     <Card className="border-indigo-200">
       <form onSubmit={submit} className="space-y-3">
         <h3 className="font-semibold">{initial ? "Edit question" : "New question"}</h3>
+        {!initial && (
+          <Field
+            label="Start from a standard scale (optional)"
+            hint={QUESTION_TEMPLATES.find((t) => t.id === templateId)?.description}
+          >
+            <Select value={templateId} onChange={(e) => applyTemplate(e.target.value)} className="w-full">
+              <option value="">— none, write my own —</option>
+              {TEMPLATE_CATEGORIES.map((cat) => (
+                <optgroup key={cat} label={cat}>
+                  {QUESTION_TEMPLATES.filter((t) => t.category === cat).map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.label}
+                    </option>
+                  ))}
+                </optgroup>
+              ))}
+            </Select>
+          </Field>
+        )}
         <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
           <Field label="Question text">
             <Input value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="How would you rate your coding skills?" />
@@ -212,13 +259,37 @@ function QuestionForm({
           </Field>
         )}
         {kind === "number" && (
-          <div className="flex gap-3">
-            <Field label="Min">
-              <NumberInput className="w-24" value={min} onValueChange={setMin} />
-            </Field>
-            <Field label="Max">
-              <NumberInput className="w-24" value={max} onValueChange={setMax} />
-            </Field>
+          <div className="space-y-3">
+            <div className="flex gap-3">
+              <Field label="Min">
+                <NumberInput className="w-24" value={min} onValueChange={setMin} />
+              </Field>
+              <Field label="Max">
+                <NumberInput className="w-24" value={max} onValueChange={setMax} />
+              </Field>
+            </div>
+            {max - min + 1 >= 2 && max - min + 1 <= 11 && (
+              <Field label="Word for each point (optional)" hint="Students see the word next to the number; the number is what gets optimized.">
+                <div className="space-y-1">
+                  {Array.from({ length: max - min + 1 }, (_, i) => (
+                    <div key={i} className="flex items-center gap-2">
+                      <span className="w-6 shrink-0 text-right text-sm text-slate-500">{min + i}</span>
+                      <Input
+                        value={labels[i] ?? ""}
+                        placeholder={i === 0 ? "e.g. No experience" : i === max - min ? "e.g. Expert" : ""}
+                        onChange={(e) =>
+                          setLabels((prev) => {
+                            const next = [...prev];
+                            next[i] = e.target.value;
+                            return next;
+                          })
+                        }
+                      />
+                    </div>
+                  ))}
+                </div>
+              </Field>
+            )}
           </div>
         )}
         {kind === "projectRanking" && (
@@ -229,7 +300,7 @@ function QuestionForm({
         {kind === "teammates" && (
           <Field
             label="Max teammate codes"
-            hint="Students list login codes of classmates they want to work with (they exchange codes themselves)."
+            hint="Students list the share codes of classmates they want to work with (each student sees their own share code after logging in)."
           >
             <NumberInput className="w-24" min={1} max={10} value={maxCodes} onValueChange={setMaxCodes} />
           </Field>

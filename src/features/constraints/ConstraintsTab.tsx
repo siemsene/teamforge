@@ -1,7 +1,8 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { useSession } from "../sessions/SessionContext";
 import { updateSession } from "../../lib/db";
 import { randomId } from "../../lib/util";
+import { syncProjectRequirementsConstraint } from "./autoConstraints";
 import type { Constraint, ConstraintWeight, Question } from "../../types";
 import { Badge, Button, Card, ErrorText, Field, NumberInput, Select } from "../../components/ui";
 
@@ -35,10 +36,34 @@ export function describeConstraint(c: Constraint, questions: Question[]): string
 }
 
 export function ConstraintsTab() {
-  const { sid, session, publicConfig } = useSession();
+  const { sid, session, publicConfig, projects } = useSession();
   const [adding, setAdding] = useState(false);
   const constraints = session.constraints;
   const questions = publicConfig.questions;
+
+  // Keep the umbrella project-requirements constraint in sync for existing
+  // sessions too (it converges: a write updates session.constraints, the next
+  // run finds nothing to change). Project edits also sync it from ProjectsTab.
+  useEffect(() => {
+    const synced = syncProjectRequirementsConstraint(constraints, projects, session.genericProjects);
+    if (synced !== constraints) void updateSession(sid, { constraints: synced });
+  }, [constraints, projects, session.genericProjects, sid]);
+
+  // Zero-config "preference" constraints that apply but haven't been added yet.
+  const hasRanking = questions.some((q) => q.kind === "projectRanking");
+  const hasTeammates = questions.some((q) => q.kind === "teammates");
+  const has = (kind: Constraint["kind"]) => constraints.some((c) => c.kind === kind);
+  const suggestions: { label: string; make: () => Constraint }[] = [];
+  if (hasTeammates && !has("teammatePreference"))
+    suggestions.push({
+      label: "Respect teammate preferences",
+      make: () => ({ id: randomId(8), kind: "teammatePreference", weight: "important" }),
+    });
+  if (!session.genericProjects && hasRanking && !has("projectPreference"))
+    suggestions.push({
+      label: "Respect project preferences",
+      make: () => ({ id: randomId(8), kind: "projectPreference", weight: "important" }),
+    });
 
   async function save(constraint: Constraint) {
     await updateSession(sid, { constraints: [...constraints, constraint] });
@@ -65,7 +90,26 @@ export function ConstraintsTab() {
         <Button onClick={() => setAdding((v) => !v)}>{adding ? "Cancel" : "Add constraint"}</Button>
       </div>
 
-      {adding && <ConstraintForm questions={questions} genericProjects={session.genericProjects} onSave={save} />}
+      {adding && <ConstraintForm questions={questions} onSave={save} />}
+
+      {suggestions.length > 0 && (
+        <Card className="border-indigo-200 bg-indigo-50/40">
+          <h3 className="mb-2 text-sm font-semibold">Suggested constraints</h3>
+          <p className="mb-3 text-sm text-slate-600">
+            Based on your survey questions. Add one with a click, then adjust its weight.
+          </p>
+          <div className="space-y-2">
+            {suggestions.map((s) => (
+              <div key={s.label} className="flex items-center justify-between gap-3">
+                <span className="text-sm text-slate-700">{s.label}</span>
+                <Button variant="secondary" onClick={() => save(s.make())}>
+                  Add
+                </Button>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
 
       {constraints.length === 0 && !adding && (
         <Card>
@@ -73,37 +117,47 @@ export function ConstraintsTab() {
         </Card>
       )}
 
-      {constraints.map((c) => (
-        <Card key={c.id}>
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Badge tone={WEIGHT_TONE[c.weight]}>{WEIGHT_LABEL[c.weight]}</Badge>
-              <span className="text-sm">{describeConstraint(c, questions)}</span>
+      {constraints.map((c) => {
+        const managed = c.kind === "projectRequirements";
+        return (
+          <Card key={c.id}>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Badge tone={WEIGHT_TONE[c.weight]}>{WEIGHT_LABEL[c.weight]}</Badge>
+                <span className="text-sm">{describeConstraint(c, questions)}</span>
+                {managed && <Badge tone="indigo">from Projects</Badge>}
+              </div>
+              <div className="flex shrink-0 items-center gap-2">
+                <Select value={c.weight} onChange={(e) => setWeight(c.id, e.target.value as ConstraintWeight)}>
+                  <option value="must">Must hold</option>
+                  <option value="important">Important</option>
+                  <option value="nice">Nice to have</option>
+                </Select>
+                {!managed && (
+                  <Button variant="danger" onClick={() => remove(c.id)}>
+                    Delete
+                  </Button>
+                )}
+              </div>
             </div>
-            <div className="flex shrink-0 items-center gap-2">
-              <Select value={c.weight} onChange={(e) => setWeight(c.id, e.target.value as ConstraintWeight)}>
-                <option value="must">Must hold</option>
-                <option value="important">Important</option>
-                <option value="nice">Nice to have</option>
-              </Select>
-              <Button variant="danger" onClick={() => remove(c.id)}>
-                Delete
-              </Button>
-            </div>
-          </div>
-        </Card>
-      ))}
+            {managed && (
+              <p className="mt-1 text-xs text-slate-500">
+                Reflects the requirements set on the Projects tab — add or remove them there; set how strongly they're
+                enforced with the weight here.
+              </p>
+            )}
+          </Card>
+        );
+      })}
     </div>
   );
 }
 
 function ConstraintForm({
   questions,
-  genericProjects,
   onSave,
 }: {
   questions: Question[];
-  genericProjects: boolean;
   onSave: (c: Constraint) => Promise<void>;
 }) {
   const [kind, setKind] = useState<Constraint["kind"]>("antiIsolation");
@@ -116,8 +170,6 @@ function ConstraintForm({
 
   const categorical = questions.filter((q) => q.kind === "single" || q.kind === "multi");
   const numeric = questions.filter((q) => q.kind === "number");
-  const hasRanking = questions.some((q) => q.kind === "projectRanking");
-  const hasTeammates = questions.some((q) => q.kind === "teammates");
 
   const selectedCategorical = categorical.find((q) => q.id === questionId);
   const options = selectedCategorical && "options" in selectedCategorical ? selectedCategorical.options : [];
@@ -128,9 +180,6 @@ function ConstraintForm({
     const id = randomId(8);
     let c: Constraint;
     switch (kind) {
-      case "projectRequirements":
-        c = { id, kind, weight };
-        break;
       case "antiIsolation":
         if (!questionId || !value) return setError("Pick a question and a value.");
         c = { id, kind, weight, questionId, value };
@@ -143,10 +192,8 @@ function ConstraintForm({
         if (!questionId) return setError("Pick a numeric question.");
         c = { id, kind, weight, questionId, threshold, minCount };
         break;
-      case "projectPreference":
-      case "teammatePreference":
-        c = { id, kind, weight };
-        break;
+      default:
+        return setError("Unsupported constraint type.");
     }
     await onSave(c);
   }
@@ -160,9 +207,6 @@ function ConstraintForm({
               <option value="antiIsolation">Anti-isolation (never exactly one …)</option>
               <option value="minCapability">Capability coverage (every team needs …)</option>
               <option value="balanceNumeric">Balance a numeric attribute</option>
-              {!genericProjects && <option value="projectRequirements">Enforce project requirements</option>}
-              {!genericProjects && hasRanking && <option value="projectPreference">Respect project preferences</option>}
-              {hasTeammates && <option value="teammatePreference">Respect teammate preferences</option>}
             </Select>
           </Field>
           <Field label="Priority">
@@ -231,18 +275,6 @@ function ConstraintForm({
               <NumberInput min={1} value={minCount} onValueChange={setMinCount} />
             </Field>
           </div>
-        )}
-
-        {kind === "projectRequirements" && (
-          <p className="text-sm text-slate-600">
-            Each project's attribute requirements (from the Projects tab) become team constraints.
-          </p>
-        )}
-        {kind === "projectPreference" && (
-          <p className="text-sm text-slate-600">Penalizes assigning students to projects they ranked low or not at all.</p>
-        )}
-        {kind === "teammatePreference" && (
-          <p className="text-sm text-slate-600">Rewards placing students with at least one classmate they listed.</p>
         )}
 
         <ErrorText>{error}</ErrorText>

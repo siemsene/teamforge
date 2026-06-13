@@ -87,6 +87,28 @@ function QuestionInput({
 }) {
   if (q.kind === "number") {
     const current = typeof value === "number" ? value : undefined;
+    // When points carry words, lay them out vertically so each label is readable.
+    if (q.labels?.length) {
+      return (
+        <div className="space-y-1">
+          {Array.from({ length: q.max - q.min + 1 }, (_, i) => q.min + i).map((n, i) => (
+            <button
+              key={n}
+              type="button"
+              onClick={() => onChange(n)}
+              className={`flex w-full items-center gap-3 rounded-md border px-3 py-1.5 text-left text-sm ${
+                current === n
+                  ? "border-indigo-600 bg-indigo-50 font-medium text-indigo-700"
+                  : "border-slate-300 bg-white hover:bg-slate-50"
+              }`}
+            >
+              <span className="w-5 shrink-0 text-center font-medium">{n}</span>
+              <span>{q.labels?.[i]}</span>
+            </button>
+          ))}
+        </div>
+      );
+    }
     return (
       <div className="flex flex-wrap gap-2">
         {Array.from({ length: q.max - q.min + 1 }, (_, i) => q.min + i).map((n) => (
@@ -204,14 +226,14 @@ function TeammatesInput({
   return (
     <div className="space-y-2">
       <p className="text-xs text-slate-500">
-        Optional. Enter the login codes of classmates you'd like to team up with (ask them for their code). Leave
-        blank if no preference.
+        Optional. Enter the <strong>share codes</strong> of classmates you'd like to team up with (ask them for their
+        share code — not their login code). Leave blank if no preference.
       </p>
       {Array.from({ length: q.maxCodes }, (_, i) => (
         <input
           key={i}
           className="w-full rounded-md border border-slate-300 px-3 py-1.5 font-mono text-sm uppercase focus:border-indigo-500 focus:outline-none sm:w-56"
-          placeholder="XXXXX-XXXXX"
+          placeholder="XXXX"
           value={codes[i] ?? ""}
           onChange={(e) => {
             const next = [...codes];

@@ -1,7 +1,8 @@
 import { useState, type FormEvent } from "react";
 import { useSession } from "../sessions/SessionContext";
-import { deleteProject, saveProject, updatePublicConfig } from "../../lib/db";
+import { deleteProject, saveProject, updatePublicConfig, updateSession } from "../../lib/db";
 import { syncAutoQuestions, slugify } from "../survey-builder/autoQuestions";
+import { syncProjectRequirementsConstraint } from "../constraints/autoConstraints";
 import { randomId } from "../../lib/util";
 import type { Project, ProjectRequirement } from "../../types";
 import { Badge, Button, Card, ErrorText, Field, Input, NumberInput, TextArea } from "../../components/ui";
@@ -18,6 +19,10 @@ export function ProjectsTab() {
       projects: updatedProjects.map((p) => ({ id: p.id, name: p.name, description: p.description })),
       questions: syncAutoQuestions(publicConfig.questions, updatedProjects, session.genericProjects),
     });
+    // Keep the umbrella project-requirements constraint in step with the
+    // requirements just defined, so it shows up (weightable) on the Constraints tab.
+    const constraints = syncProjectRequirementsConstraint(session.constraints, updatedProjects, session.genericProjects);
+    if (constraints !== session.constraints) await updateSession(sid, { constraints });
   }
 
   async function save(project: Project) {

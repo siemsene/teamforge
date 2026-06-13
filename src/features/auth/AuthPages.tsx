@@ -25,6 +25,7 @@ function AuthShell({ title, children }: { title: string; children: ReactNode }) 
 export function SignUpPage() {
   const navigate = useNavigate();
   const [name, setName] = useState("");
+  const [university, setUniversity] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -34,12 +35,13 @@ export function SignUpPage() {
     e.preventDefault();
     setError("");
     if (name.trim().length < 2) return setError("Please enter your real name.");
+    if (university.trim().length < 2) return setError("Please enter your university or institution.");
     setBusy(true);
     try {
       const cred = await createUserWithEmailAndPassword(auth, email.trim(), password);
-      await createInstructorProfile(cred.user.uid, name.trim(), email.trim());
+      await createInstructorProfile(cred.user.uid, name.trim(), email.trim(), university.trim());
       // Fire-and-forget: a failed notification must not block registration.
-      void notifyAdminOfRegistration(name.trim(), email.trim());
+      void notifyAdminOfRegistration(name.trim(), email.trim(), university.trim());
       await sendEmailVerification(cred.user);
       navigate("/dashboard");
     } catch (err) {
@@ -55,7 +57,18 @@ export function SignUpPage() {
         <Field label="Full name">
           <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Dr. Jane Doe" required />
         </Field>
-        <Field label="Email" hint="Use your institutional email — accounts are manually approved.">
+        <Field label="University / institution">
+          <Input
+            value={university}
+            onChange={(e) => setUniversity(e.target.value)}
+            placeholder="State University"
+            required
+          />
+        </Field>
+        <Field
+          label="Email"
+          hint="Please sign up with your university email — it speeds up manual approval of your account."
+        >
           <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
         </Field>
         <Field label="Password">

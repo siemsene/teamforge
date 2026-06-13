@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
-import { createSession, watchSessions } from "../../lib/db";
+import { createSession, updateInstructorUsage, watchSessions } from "../../lib/db";
 import { generateSessionKeys } from "../../lib/crypto";
-import { generateCodes, hashCode } from "../../lib/codes";
-import { downloadFile, randomId, surveyUrl, toCsv } from "../../lib/util";
+import { generateCodes, generateShareCodes, hashCode } from "../../lib/codes";
+import { downloadFile, randomId, sessionFilename, surveyUrl, toCsv } from "../../lib/util";
 import { DEFAULT_PRIVACY_NOTE } from "./privacyNote";
 import type { PublicConfig, SessionDoc, SessionSummary } from "../../types";
 import { Badge, Button, Card, ErrorText, Field, Input, NumberInput, Spinner } from "../../components/ui";
@@ -20,6 +20,19 @@ export function DashboardPage() {
     if (!user) return;
     return watchSessions(user.uid, setSessions);
   }, [user]);
+
+  // Keep the instructor's data-usage summary current so the admin can see who
+  // to remind about cleanup. Only writes when the numbers actually change.
+  const lastUsage = useRef("");
+  useEffect(() => {
+    if (!user || !sessions) return;
+    const count = sessions.length;
+    const students = sessions.reduce((n, s) => n + (s.numStudents ?? 0), 0);
+    const key = `${count}:${students}`;
+    if (key === lastUsage.current) return;
+    lastUsage.current = key;
+    void updateInstructorUsage(user.uid, { sessions: count, students, updatedAt: Date.now() }).catch(() => {});
+  }, [user, sessions]);
 
   return (
     <div className="mx-auto max-w-4xl space-y-6 px-4 py-8">
@@ -104,6 +117,8 @@ function NewSessionForm({ onDone }: { onDone: () => void }) {
       const { wrappedKeys, recoveryKeyB64 } = await generateSessionKeys(passphrase);
       const codes = generateCodes(numStudents);
       const hashes = await Promise.all(codes.map(hashCode));
+      const shareCodes = generateShareCodes(numStudents);
+      const roster = hashes.map((hash, i) => ({ hash, shareCode: shareCodes[i] }));
 
       const session: SessionDoc = {
         ownerUid: user.uid,
@@ -130,27 +145,27 @@ function NewSessionForm({ onDone }: { onDone: () => void }) {
         privacyNote: DEFAULT_PRIVACY_NOTE,
       };
 
-      await createSession(sid, session, publicConfig, hashes);
+      await createSession(sid, session, publicConfig, roster);
 
       // One-time downloads: login codes + recovery key. Codes are never stored
       // server-side (only their hashes), so this is the only copy.
       const link = surveyUrl(sid);
       downloadFile(
-        `${sid}-student-codes.csv`,
+        sessionFilename(title.trim(), sid, "student-codes.csv"),
         toCsv([
-          ["studentIndex", "loginCode", "surveyLink", "yourStudentName", "yourStudentEmail"],
-          ...codes.map((c, i) => [i + 1, c, link, "", ""]),
+          ["studentIndex", "loginCode", "shareCode", "surveyLink", "yourStudentName", "yourStudentEmail"],
+          ...codes.map((c, i) => [i + 1, c, shareCodes[i], link, "", ""]),
         ]),
         "text/csv",
       );
       downloadFile(
-        `${sid}-recovery-key.txt`,
+        sessionFilename(title.trim(), sid, "recovery-key.txt"),
         `TeamForge recovery key for session "${title.trim()}" (${sid})\n` +
           `Keep this file safe. It unlocks student data if you forget your passphrase.\n\n${recoveryKeyB64}\n`,
       );
       window.alert(
         "Two files were downloaded:\n\n" +
-          "1. Student login codes (CSV) — assign a code to each student in the two empty columns and keep that list private. Codes are NOT stored on the server and cannot be re-downloaded.\n\n" +
+          "1. Student login codes (CSV) — assign a code to each student in the two empty columns and keep that list private. Codes are NOT stored on the server and cannot be re-downloaded. Each row also has a public 'shareCode' students use to list preferred teammates — that one is safe to share and cannot be used to log in.\n\n" +
           "2. Recovery key — store it somewhere safe (not with the codes). It is the only way to unlock survey data if you forget your passphrase.",
       );
       onDone();

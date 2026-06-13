@@ -193,6 +193,8 @@ function SurveyStage({
     onDone(false);
   }
 
+  const showsTeammates = config.questions.some((q) => q.kind === "teammates");
+
   return (
     <>
       <Card>
@@ -207,6 +209,16 @@ function SurveyStage({
           </div>
         )}
       </Card>
+      {showsTeammates && student.shareCode && (
+        <Card className="bg-indigo-50">
+          <h2 className="mb-1 font-semibold">Your share code</h2>
+          <p className="text-sm text-slate-700">
+            Give this code to classmates you'd like on your team, and ask them for theirs to enter in the teammates
+            question below. It can't be used to log in, so it's safe to share — but keep your login code private.
+          </p>
+          <p className="mt-2 font-mono text-2xl font-bold tracking-widest">{student.shareCode}</p>
+        </Card>
+      )}
       <SurveyForm config={config} busy={busy} onSubmit={submit} />
       <ErrorText>{error}</ErrorText>
     </>

@@ -1,6 +1,6 @@
 import { initializeApp } from "firebase/app";
 import { connectAuthEmulator, getAuth } from "firebase/auth";
-import { connectFirestoreEmulator, getFirestore } from "firebase/firestore";
+import { connectFirestoreEmulator, initializeFirestore } from "firebase/firestore";
 
 // Values come from .env.local (see .env.example). Firebase web config is not
 // secret — access control lives in firestore.rules.
@@ -15,7 +15,10 @@ const firebaseConfig = {
 
 export const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
-export const db = getFirestore(app);
+// ignoreUndefinedProperties: optional fields left undefined (e.g. a manual
+// question's auto/attributeKey, a project's min/maxSize) are omitted rather
+// than rejected — Firestore otherwise throws on any undefined field value.
+export const db = initializeFirestore(app, { ignoreUndefinedProperties: true });
 
 /** UID of the app admin (you). Must match the constant in firestore.rules. */
 export const ADMIN_UID: string = import.meta.env.VITE_ADMIN_UID ?? "";

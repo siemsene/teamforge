@@ -24,7 +24,7 @@ export function adminNotificationsConfigured(): boolean {
  * (never throws) so it can be fired without blocking registration; callers
  * should not await it on the critical path.
  */
-export async function notifyAdminOfRegistration(name: string, email: string): Promise<void> {
+export async function notifyAdminOfRegistration(name: string, email: string, university: string): Promise<void> {
   if (!adminNotificationsConfigured()) return;
 
   try {
@@ -41,8 +41,9 @@ export async function notifyAdminOfRegistration(name: string, email: string): Pr
         name,
         message:
           "A new instructor has registered on TeamForge and is awaiting approval:\n\n" +
-          `Name:  ${name}\n` +
-          `Email: ${email}\n\n` +
+          `Name:       ${name}\n` +
+          `University: ${university}\n` +
+          `Email:      ${email}\n\n` +
           "Approve or revoke them in the admin panel.",
       }),
     });

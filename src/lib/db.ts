@@ -26,6 +26,7 @@ import type {
   AllocationDoc,
   EciesPayload,
   InstructorProfile,
+  InstructorUsage,
   Project,
   PublicConfig,
   SessionDoc,
@@ -35,9 +36,26 @@ import type {
 
 // ---------- instructors ----------
 
-export async function createInstructorProfile(uid: string, name: string, email: string): Promise<void> {
-  const profile: InstructorProfile = { name, email, approved: false, createdAt: Date.now() };
+export async function createInstructorProfile(
+  uid: string,
+  name: string,
+  email: string,
+  university: string,
+): Promise<void> {
+  const profile: InstructorProfile = {
+    name,
+    email,
+    university,
+    approved: false,
+    createdAt: Date.now(),
+    usage: { sessions: 0, students: 0, updatedAt: Date.now() },
+  };
   await setDoc(doc(db, "users", uid), profile);
+}
+
+/** Refreshes the instructor's data-usage summary (does not touch the approved flag). */
+export async function updateInstructorUsage(uid: string, usage: InstructorUsage): Promise<void> {
+  await updateDoc(doc(db, "users", uid), { usage });
 }
 
 export function watchProfile(uid: string, cb: (p: InstructorProfile | null) => void): Unsubscribe {
@@ -62,7 +80,7 @@ export async function createSession(
   sid: string,
   session: SessionDoc,
   publicConfig: PublicConfig,
-  codeHashes: string[],
+  roster: { hash: string; shareCode: string }[],
 ): Promise<void> {
   // The session doc must be committed first and on its own: the rules for the
   // public/config doc (and the student docs below) call ownsSession(sid), which
@@ -75,11 +93,16 @@ export async function createSession(
 
   // Firestore batches cap at 500 writes; chunk the student docs.
 
-  for (let i = 0; i < codeHashes.length; i += 450) {
+  for (let i = 0; i < roster.length; i += 450) {
     const batch = writeBatch(db);
-    codeHashes.slice(i, i + 450).forEach((hash, j) => {
-      const student: StudentDoc = { codeIndex: i + j + 1, submittedAt: null, response: null };
-      batch.set(doc(db, "sessions", sid, "students", hash), student);
+    roster.slice(i, i + 450).forEach((entry, j) => {
+      const student: StudentDoc = {
+        codeIndex: i + j + 1,
+        shareCode: entry.shareCode,
+        submittedAt: null,
+        response: null,
+      };
+      batch.set(doc(db, "sessions", sid, "students", entry.hash), student);
     });
     await batch.commit();
   }
@@ -207,6 +230,9 @@ export async function deleteSessionCompletely(sid: string): Promise<void> {
   await deleteCollectionDocs(sid, "students");
   await deleteCollectionDocs(sid, "projects");
   await deleteCollectionDocs(sid, "results");
-  await deleteCollectionDocs(sid, "public");
+  // The "public" subcollection only ever holds the single "config" doc, and the
+  // rules grant get/write on it but not list — so delete it directly rather than
+  // via a (forbidden) collection query.
+  await deleteDoc(doc(db, "sessions", sid, "public", "config")).catch(() => {});
   await deleteDoc(doc(db, "sessions", sid));
 }

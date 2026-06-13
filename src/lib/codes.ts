@@ -23,6 +23,27 @@ export function generateCodes(n: number): string[] {
   return [...seen];
 }
 
+// Public "share code": a short identifier a student can give to classmates so
+// they can list them as preferred teammates. It is NOT a login secret and
+// reveals nothing about the login code, so sharing it cannot enable
+// impersonation. 4 chars from the 32-char alphabet (~1M space) — generated
+// unique per session, so matching is unambiguous.
+const SHARE_CODE_LENGTH = 4;
+
+export function generateShareCode(): string {
+  const bytes = new Uint8Array(SHARE_CODE_LENGTH);
+  globalThis.crypto.getRandomValues(bytes);
+  let code = "";
+  for (let i = 0; i < SHARE_CODE_LENGTH; i++) code += ALPHABET[bytes[i] % 32];
+  return code;
+}
+
+export function generateShareCodes(n: number): string[] {
+  const seen = new Set<string>();
+  while (seen.size < n) seen.add(generateShareCode());
+  return [...seen];
+}
+
 /** Tolerant of case, spaces, dashes, and common transcription mistakes (O->0, I/L->1). */
 export function normalizeCode(input: string): string {
   return input

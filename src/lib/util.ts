@@ -34,3 +34,26 @@ export function toCsv(rows: (string | number)[][]): string {
 export function surveyUrl(sid: string): string {
   return `${window.location.origin}/s/${sid}`;
 }
+
+/** Filesystem-safe slug of a session title, for use in download filenames. */
+export function fileSlug(name: string): string {
+  const slug = name
+    .normalize("NFKD")
+    .replace(/[^\w\s-]/g, "") // drop punctuation/accents
+    .trim()
+    .replace(/[\s_-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .toLowerCase()
+    .slice(0, 60);
+  return slug || "session";
+}
+
+/**
+ * Download filename combining the readable session title with a short slice of
+ * the session id, so files are recognizable yet unique across same-named
+ * sessions. e.g. sessionFilename("MGMT 4500", "abc123def456", "teams.csv")
+ * -> "mgmt-4500-abc123-teams.csv".
+ */
+export function sessionFilename(title: string, sid: string, suffix: string): string {
+  return `${fileSlug(title)}-${sid.slice(0, 6)}-${suffix}`;
+}

@@ -3,6 +3,7 @@
 // survey question, and sessions with named projects get a ranking question.
 
 import type { Project, Question, SingleChoiceQuestion } from "../../types";
+import { standardScaleOptions } from "./questionTemplates";
 
 export const PROJECT_RANKING_ID = "auto-project-ranking";
 
@@ -52,8 +53,12 @@ export function syncAutoQuestions(questions: Question[], projects: Project[], ge
     result.push(q);
   }
 
-  // New attributes that have no question yet.
+  // New attributes that have no question yet. Seed options from a matching
+  // standard scale (e.g. "major") when one exists, then ensure the project's
+  // required values are present. The instructor can edit options afterwards.
   for (const [key, entry] of byAttribute) {
+    const options = [...(standardScaleOptions(key) ?? [])];
+    for (const v of entry.values) if (!options.includes(v)) options.push(v);
     const q: SingleChoiceQuestion = {
       id: autoQuestionId(key),
       kind: "single",
@@ -61,7 +66,7 @@ export function syncAutoQuestions(questions: Question[], projects: Project[], ge
       required: true,
       auto: true,
       attributeKey: key,
-      options: [...entry.values],
+      options,
     };
     result.push(q);
   }
