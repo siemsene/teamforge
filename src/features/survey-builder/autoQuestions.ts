@@ -20,6 +20,25 @@ export function slugify(label: string): string {
 }
 
 /**
+ * Removes blank, whitespace-only, and duplicate options. Duplicates are matched
+ * case-insensitively after trimming, keeping the first occurrence's wording, so
+ * a survey question never shows the same category twice (e.g. "Woman"/"woman").
+ */
+export function dedupeOptions(options: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of options) {
+    const o = raw.trim();
+    if (!o) continue;
+    const key = o.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(o);
+  }
+  return out;
+}
+
+/**
  * Returns the updated question list: auto questions added/updated for current
  * requirements, stale auto questions removed, manual questions untouched
  * (including manual edits to auto question options — options are merged).
@@ -38,9 +57,9 @@ export function syncAutoQuestions(questions: Question[], projects: Project[], ge
     if (q.auto && q.kind === "single" && q.attributeKey) {
       const entry = byAttribute.get(q.attributeKey);
       if (!entry) continue; // requirement gone -> drop the auto question
-      // Merge any new requirement values into the options, keep instructor additions.
-      const options = [...q.options];
-      for (const v of entry.values) if (!options.includes(v)) options.push(v);
+      // Merge any new requirement values into the options, keep instructor
+      // additions, and drop blank/duplicate categories.
+      const options = dedupeOptions([...q.options, ...entry.values]);
       result.push({ ...q, options });
       byAttribute.delete(q.attributeKey);
       continue;
@@ -57,8 +76,7 @@ export function syncAutoQuestions(questions: Question[], projects: Project[], ge
   // standard scale (e.g. "major") when one exists, then ensure the project's
   // required values are present. The instructor can edit options afterwards.
   for (const [key, entry] of byAttribute) {
-    const options = [...(standardScaleOptions(key) ?? [])];
-    for (const v of entry.values) if (!options.includes(v)) options.push(v);
+    const options = dedupeOptions([...(standardScaleOptions(key) ?? []), ...entry.values]);
     const q: SingleChoiceQuestion = {
       id: autoQuestionId(key),
       kind: "single",

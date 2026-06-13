@@ -2,10 +2,11 @@ import { useState, type FormEvent } from "react";
 import { useSession } from "../sessions/SessionContext";
 import { deleteProject, saveProject, updatePublicConfig, updateSession } from "../../lib/db";
 import { syncAutoQuestions, slugify } from "../survey-builder/autoQuestions";
+import { standardScaleOptions } from "../survey-builder/questionTemplates";
 import { syncProjectRequirementsConstraint } from "../constraints/autoConstraints";
 import { randomId } from "../../lib/util";
 import type { Project, ProjectRequirement } from "../../types";
-import { Badge, Button, Card, ErrorText, Field, Input, NumberInput, TextArea } from "../../components/ui";
+import { Badge, Button, Card, ErrorText, Field, Input, NumberInput, Select, TextArea } from "../../components/ui";
 
 export function ProjectsTab() {
   const { sid, session, projects, publicConfig } = useSession();
@@ -187,7 +188,11 @@ function ProjectForm({
                 />
               </Field>
               <Field label="Required value">
-                <Input value={r.value} placeholder="Computer Science" onChange={(e) => setReq(i, { value: e.target.value })} />
+                <RequirementValueField
+                  attributeLabel={r.attributeLabel}
+                  value={r.value}
+                  onChange={(v) => setReq(i, { value: v })}
+                />
               </Field>
               <Field label="Min count">
                 <NumberInput
@@ -214,5 +219,61 @@ function ProjectForm({
         </div>
       </form>
     </Card>
+  );
+}
+
+const OTHER = "__other__";
+
+/**
+ * Required-value input. When the attribute has a standard scale (e.g. "Gender",
+ * "Major"), offer that scale's values as a dropdown so requirements reuse the
+ * survey's exact categories — avoiding synonyms like "Female" vs "Woman" that
+ * would both show up as separate options. Falls back to free text otherwise,
+ * and an "Other…" choice keeps custom values possible.
+ */
+function RequirementValueField({
+  attributeLabel,
+  value,
+  onChange,
+}: {
+  attributeLabel: string;
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const scale = standardScaleOptions(slugify(attributeLabel));
+  const [pickedOther, setPickedOther] = useState(false);
+
+  if (!scale) {
+    return <Input value={value} placeholder="Computer Science" onChange={(e) => onChange(e.target.value)} />;
+  }
+
+  const custom = pickedOther || (value !== "" && !scale.includes(value));
+  return (
+    <div className="space-y-1">
+      <Select
+        value={custom ? OTHER : value}
+        onChange={(e) => {
+          if (e.target.value === OTHER) {
+            setPickedOther(true);
+            onChange("");
+          } else {
+            setPickedOther(false);
+            onChange(e.target.value);
+          }
+        }}
+        className="w-full"
+      >
+        <option value="">— select —</option>
+        {scale.map((o) => (
+          <option key={o} value={o}>
+            {o}
+          </option>
+        ))}
+        <option value={OTHER}>Other…</option>
+      </Select>
+      {custom && (
+        <Input value={value} placeholder="Custom value" onChange={(e) => onChange(e.target.value)} />
+      )}
+    </div>
   );
 }

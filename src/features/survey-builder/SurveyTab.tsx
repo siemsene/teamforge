@@ -4,6 +4,7 @@ import { updatePublicConfig } from "../../lib/db";
 import { randomId } from "../../lib/util";
 import type { Question, QuestionKind } from "../../types";
 import { QUESTION_TEMPLATES, TEMPLATE_CATEGORIES } from "./questionTemplates";
+import { dedupeOptions } from "./autoQuestions";
 import { Badge, Button, Card, ErrorText, Field, Input, NumberInput, Select } from "../../components/ui";
 
 const KIND_LABELS: Record<QuestionKind, string> = {
@@ -194,11 +195,8 @@ function QuestionForm({
       const hasLabels = pointLabels.some(Boolean);
       q = { ...base, kind, min, max, ...(hasLabels ? { labels: pointLabels } : {}) };
     } else if (kind === "single" || kind === "multi") {
-      const opts = options
-        .split("\n")
-        .map((s) => s.trim())
-        .filter(Boolean);
-      if (opts.length < 2) return setError("Provide at least two options (one per line).");
+      const opts = dedupeOptions(options.split("\n"));
+      if (opts.length < 2) return setError("Provide at least two distinct options (one per line).");
       q = { ...base, kind, options: opts };
     } else if (kind === "projectRanking") {
       q = { ...base, kind, rankCount: Math.max(1, rankCount) };
