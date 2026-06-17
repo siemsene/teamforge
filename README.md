@@ -77,3 +77,9 @@ npm run docs   # runs scripts/generate-{instructor,student}-guide.mjs
 5. Opens the session and emails each student the survey link + their code (template provided).
 6. Students submit; the dashboard shows completion by code number.
 7. Instructor closes the session, unlocks with the passphrase, runs the optimizer, drags students between teams with live violation feedback, exports the final CSV, and purges student data.
+
+## License
+
+© 2026 Enno Siemsen. Licensed under [Creative Commons Attribution-NonCommercial 4.0 International](https://creativecommons.org/licenses/by-nc/4.0/) (CC BY-NC 4.0) — see [LICENSE](LICENSE).
+
+You may share and adapt the material with attribution, **for non-commercial purposes**. For commercial use, contact the author.

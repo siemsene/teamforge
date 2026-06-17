@@ -20,6 +20,7 @@ ui-debug.log
 *-debug.log
 
 # Editor / OS
+.claude
 .vscode/*
 !.vscode/extensions.json
 .idea
