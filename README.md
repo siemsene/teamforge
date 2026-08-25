@@ -78,6 +78,23 @@ npm run docs   # runs scripts/generate-{instructor,student}-guide.mjs
 6. Students submit; the dashboard shows completion by code number.
 7. Instructor closes the session, unlocks with the passphrase, runs the optimizer, drags students between teams with live violation feedback, exports the final CSV, and purges student data.
 
+## Team management (optional)
+
+After allocation, an instructor may enable a **Team management** phase on the same session to run team contracts and peer evaluations. It is entirely optional — allocation-only sessions are unaffected.
+
+- **Roster.** On the **Teams** tab, the instructor uploads the completed login-codes CSV with two added columns — `name` and `team` — reflecting the final teams (which may have been adjusted after allocation). The browser encrypts each student's name and team under a key derived from that student's own login code, so the platform still never stores names or team membership in plaintext. Contract text and an encrypted team directory are written the same way.
+- **Contracts.** Students log in with the same code and land on a hub. Any team member drafts the team's contract (communications, attendance, timeliness, respect, effort, integrity, plus custom sections), optionally requests AI feedback, and finalizes it. Contracts are encrypted for the team and shared with the instructor; every member can save the finalized contract as a PDF (print → Save as PDF). The instructor reads all contracts on the Teams tab after unlocking.
+- **Peer evaluations.** Two rounds — a **practice** (formative) round whose results are returned privately, and a **graded** (summative) round. The form matches the published spreadsheet: allocate 100 points across teammates, four 1–5 behavior ratings, and an optional confidential comment. The instructor opens/closes each round, sees completion by code number, and after unlocking computes team factors (neutral = 100 ÷ raters; outlier discard on teams of five or more; proportional gap halved; clamped 0.80–1.10 by default), reviews flags (factor < 0.90, or a team spread > 0.25), exports summary and detail CSVs, and can publish each student's own factor back to them privately.
+
+### AI contract feedback (optional)
+
+AI feedback runs through a small **Cloudflare Worker** in [`worker/`](worker/) that holds the Anthropic API key as a secret — necessary because the app itself has no server. Deploy it (see [`worker/README.md`](worker/README.md)), then:
+
+- set `VITE_AI_PROXY_URL` in `.env.local` to the worker URL, and
+- add that origin to the `connect-src` directive of the Content-Security-Policy in `firebase.json` (the default already allows `https://*.workers.dev`; change it if you use a custom domain), then rebuild and redeploy.
+
+When `VITE_AI_PROXY_URL` is unset the AI-feedback button simply doesn't appear and everything else in team management still works. AI feedback is the one point where contract text (never names) leaves the app's end-to-end encryption; it is disclosed to students in the privacy note and gated behind an explicit consent dialog.
+
 ## License
 
 © 2026 Enno Siemsen. Licensed under [Creative Commons Attribution-NonCommercial 4.0 International](https://creativecommons.org/licenses/by-nc/4.0/) (CC BY-NC 4.0) — see [LICENSE](LICENSE).

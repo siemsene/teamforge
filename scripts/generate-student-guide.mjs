@@ -130,5 +130,21 @@ note(
     "the survey may not be open yet, or your code may be mistyped — ask your instructor.",
 );
 
+// ---- team management (optional phase) ----
+h2("After teams are formed (if your instructor uses it)");
+p(
+  "Some instructors keep using TeamForge to manage teams during the term. Log in with the same login code to reach " +
+    "your team hub, where you can see your teammates' names, write a team contract, and complete peer evaluations.",
+);
+bullets([
+  "Team contract: any member can draft your team's norms (communication, attendance, effort, and so on). You can ask for AI feedback, revise together, then finalize and save it as a PDF. If you request AI feedback, only the contract text is sent for suggestions — don't type anyone's full name into it.",
+  "Peer evaluations: you'll allocate 100 points across your teammates (an equal split is a perfectly legitimate answer), rate a few behaviors, and optionally leave a private note to your instructor. There's a practice round first, then a graded one. Your teammates never see your answers.",
+]);
+note(
+  "Your privacy still holds here",
+  "Your name and team are encrypted with a key derived from your own login code, your peer evaluations are readable " +
+    "only by your instructor, and results returned to you are encrypted so only you can open them.",
+);
+
 doc.end();
 console.log(`Wrote ${outPath}`);

@@ -8,11 +8,13 @@ import { eciesEncrypt } from "../../lib/crypto";
 import type { PublicConfig, StudentDoc, SurveyAnswers } from "../../types";
 import { Button, Card, ConfirmDialog, ErrorText, Field, Input, Spinner } from "../../components/ui";
 import { SurveyForm } from "./SurveyForm";
+import { StudentHub } from "./StudentHub";
 
 type Stage =
   | { name: "loading" }
   | { name: "error"; message: string }
   | { name: "code"; config: PublicConfig }
+  | { name: "hub"; config: PublicConfig; hash: string; code: string; student: StudentDoc }
   | { name: "survey"; config: PublicConfig; hash: string; student: StudentDoc }
   | { name: "done"; config: PublicConfig; hash: string; resubmit: boolean };
 
@@ -52,8 +54,17 @@ export function StudentPage() {
         <CodeEntry
           sid={sid}
           config={stage.config}
-          onEnter={(hash, student) => setStage({ name: "survey", config: stage.config, hash, student })}
+          onEnter={(hash, code, student) =>
+            setStage(
+              stage.config.teamMgmt?.enabled
+                ? { name: "hub", config: stage.config, hash, code, student }
+                : { name: "survey", config: stage.config, hash, student },
+            )
+          }
         />
+      )}
+      {stage.name === "hub" && (
+        <StudentHub sid={sid} config={stage.config} hash={stage.hash} code={stage.code} student={stage.student} />
       )}
       {stage.name === "survey" && (
         <SurveyStage
@@ -86,7 +97,7 @@ function CodeEntry({
 }: {
   sid: string;
   config: PublicConfig;
-  onEnter: (hash: string, student: StudentDoc) => void;
+  onEnter: (hash: string, code: string, student: StudentDoc) => void;
 }) {
   const [code, setCode] = useState("");
   const [error, setError] = useState("");
@@ -104,7 +115,7 @@ function CodeEntry({
         setError("Code not recognized. Check for typos, or ask your instructor.");
         return;
       }
-      onEnter(hash, student);
+      onEnter(hash, code, student);
     } catch {
       setError("Could not verify the code. Please try again.");
     } finally {

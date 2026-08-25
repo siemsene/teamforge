@@ -20,7 +20,7 @@ export function PrivacyTab() {
     setMessage("");
     try {
       const n = await purgeStudentData(sid);
-      setMessage(`Deleted ${n} student records and the saved allocation.`);
+      setMessage(`Deleted ${n} student records, the saved allocation, and any team contracts and evaluations.`);
       setConfirmPurge(false);
     } catch (e) {
       setError(`Could not purge student data: ${errMsg(e)}`);
@@ -56,6 +56,13 @@ export function PrivacyTab() {
           </li>
           <li>The optimizer runs locally in your browser; decrypted data is never uploaded.</li>
           <li>The saved team allocation is also stored encrypted.</li>
+          {session.teamMgmt?.enabled && (
+            <li>
+              Team names and rosters are encrypted with a key derived from each student's login code; team contracts
+              and peer evaluations are encrypted so only you (and, for contracts, the team) can read them. If AI
+              contract feedback is enabled, only contract text — no names — leaves this end-to-end encryption.
+            </li>
+          )}
         </ul>
       </Card>
 
@@ -99,8 +106,9 @@ export function PrivacyTab() {
         onConfirm={purge}
       >
         <p>
-          This deletes all {students.length} student records, encrypted responses, login-code hashes, and any saved
-          allocation for <strong>{session.title}</strong>.
+          This deletes all {students.length} student records, encrypted responses, login-code hashes, any saved
+          allocation, and all team-management data (contracts, peer evaluations, and the encrypted team directory) for{" "}
+          <strong>{session.title}</strong>.
         </p>
         <p>Students would need new codes to participate again. This cannot be undone.</p>
       </ConfirmDialog>

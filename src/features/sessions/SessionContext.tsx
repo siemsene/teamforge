@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { watchProjects, watchPublicConfig, watchSession, watchStudents } from "../../lib/db";
 import type { Project, PublicConfig, SessionDoc, StudentDoc } from "../../types";
 
@@ -8,6 +8,10 @@ export interface SessionState {
   publicConfig: PublicConfig;
   projects: Project[];
   students: (StudentDoc & { hash: string })[];
+  /** The unlocked session private key, shared across tabs for this page's
+   * lifetime (memory only, never persisted). Null until the instructor unlocks. */
+  sessionKey: CryptoKey | null;
+  setSessionKey: (key: CryptoKey) => void;
 }
 
 const SessionContext = createContext<SessionState | null>(null);
@@ -24,6 +28,13 @@ export function SessionProvider({
   const [projects, setProjects] = useState<Project[]>([]);
   const [students, setStudents] = useState<(StudentDoc & { hash: string })[]>([]);
   const [error, setError] = useState("");
+  const [sessionKey, setSessionKeyState] = useState<CryptoKey | null>(null);
+  // Drop the unlocked key when navigating to a different session.
+  const keyForSid = useRef(sid);
+  if (keyForSid.current !== sid) {
+    keyForSid.current = sid;
+    if (sessionKey) setSessionKeyState(null);
+  }
 
   useEffect(() => {
     setSession(undefined);
@@ -43,7 +54,19 @@ export function SessionProvider({
   const loaded = !!session && !!publicConfig && !error;
   return (
     <SessionContext.Provider
-      value={loaded ? { sid, session: session!, publicConfig: publicConfig!, projects, students } : null}
+      value={
+        loaded
+          ? {
+              sid,
+              session: session!,
+              publicConfig: publicConfig!,
+              projects,
+              students,
+              sessionKey,
+              setSessionKey: setSessionKeyState,
+            }
+          : null
+      }
     >
       {children(loaded, problem)}
     </SessionContext.Provider>

@@ -63,13 +63,14 @@ async function importRecoveryKey(recoveryKeyB64: string): Promise<CryptoKey> {
   ]);
 }
 
-async function aesEncrypt(key: CryptoKey, plaintext: Uint8Array): Promise<{ iv: string; ciphertext: string }> {
+/** Also used by memberKey.ts for the symmetric (member/team key) envelopes. */
+export async function aesEncrypt(key: CryptoKey, plaintext: Uint8Array): Promise<{ iv: string; ciphertext: string }> {
   const iv = randomBytes(12);
   const ct = await subtle.encrypt({ name: "AES-GCM", iv: iv as BufferSource }, key, plaintext as BufferSource);
   return { iv: toBase64(iv), ciphertext: toBase64(ct) };
 }
 
-async function aesDecrypt(key: CryptoKey, ivB64: string, ciphertextB64: string): Promise<Uint8Array> {
+export async function aesDecrypt(key: CryptoKey, ivB64: string, ciphertextB64: string): Promise<Uint8Array> {
   const pt = await subtle.decrypt(
     { name: "AES-GCM", iv: fromBase64(ivB64) as BufferSource },
     key,

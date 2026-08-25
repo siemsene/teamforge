@@ -9,4 +9,6 @@ interface ImportMetaEnv {
   readonly VITE_FIREBASE_APP_ID: string;
   readonly VITE_ADMIN_UID: string;
   readonly VITE_USE_EMULATORS: string;
+  /** Optional: URL of the AI contract-feedback proxy worker. Blank hides the feature. */
+  readonly VITE_AI_PROXY_URL?: string;
 }

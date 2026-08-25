@@ -1,10 +1,12 @@
 // Typed Firestore access. Collection layout:
-//   users/{uid}                          instructor profiles
-//   sessions/{sid}                       owner-only session doc
-//   sessions/{sid}/public/config         student-readable survey config
-//   sessions/{sid}/projects/{pid}        owner-only project definitions
-//   sessions/{sid}/students/{codeHash}   encrypted responses, doc id = SHA-256(code)
-//   sessions/{sid}/results/allocation    encrypted allocation
+//   users/{uid}                            instructor profiles
+//   sessions/{sid}                         owner-only session doc
+//   sessions/{sid}/public/config           student-readable survey config
+//   sessions/{sid}/projects/{pid}          owner-only project definitions
+//   sessions/{sid}/students/{codeHash}     encrypted responses, doc id = SHA-256(code)
+//   sessions/{sid}/results/allocation      encrypted allocation
+//   sessions/{sid}/results/teamDirectory   encrypted team/name directory (team management)
+//   sessions/{sid}/teams/{tokenHash}       team contract docs, doc id = SHA-256(teamToken)
 
 import {
   collection,
@@ -20,19 +22,27 @@ import {
   writeBatch,
   type FirestoreError,
   type Unsubscribe,
+  type WriteBatch,
 } from "firebase/firestore";
 import { db } from "./firebase";
 import type {
+  AesEnvelope,
   Allocation,
   AllocationDoc,
+  ContractState,
   EciesPayload,
+  EvalRoundId,
   InstructorProfile,
   InstructorUsage,
+  PeerEvalSubmission,
   Project,
   PublicConfig,
+  PublicTeamMgmt,
   SessionDoc,
   SessionSummary,
   StudentDoc,
+  TeamDoc,
+  TeamMgmtConfig,
 } from "../types";
 
 // ---------- instructors ----------
@@ -248,6 +258,105 @@ export async function getAllocationDoc(sid: string): Promise<AllocationDoc | nul
 
 export type { Allocation };
 
+// ---------- team management ----------
+
+/** Writes the team-management config to the session doc and its public mirror
+ * in one batch (same pattern as updateSessionStatus). */
+export async function saveTeamMgmt(
+  sid: string,
+  config: TeamMgmtConfig,
+  publicMirror: PublicTeamMgmt,
+): Promise<void> {
+  const batch = writeBatch(db);
+  batch.update(doc(db, "sessions", sid), { teamMgmt: config, updatedAt: Date.now() });
+  batch.update(doc(db, "sessions", sid, "public", "config"), { teamMgmt: publicMirror });
+  await batch.commit();
+}
+
+/** Provisioning: per-student encrypted roster blobs + team docs, chunked. */
+export async function provisionRoster(
+  sid: string,
+  studentPatches: { hash: string; roster: AesEnvelope }[],
+  teamDocs: { tokenHash: string; team: TeamDoc }[],
+  onProgress?: (done: number, total: number) => void,
+): Promise<void> {
+  const writes: ((b: WriteBatch) => void)[] = [
+    ...studentPatches.map(
+      (p) => (b: WriteBatch) => b.update(doc(db, "sessions", sid, "students", p.hash), { roster: p.roster }),
+    ),
+    ...teamDocs.map(
+      (t) => (b: WriteBatch) => b.set(doc(db, "sessions", sid, "teams", t.tokenHash), t.team),
+    ),
+  ];
+  for (let i = 0; i < writes.length; i += 450) {
+    const batch = writeBatch(db);
+    writes.slice(i, i + 450).forEach((w) => w(batch));
+    await batch.commit();
+    onProgress?.(Math.min(i + 450, writes.length), writes.length);
+  }
+}
+
+export async function saveTeamDirectory(sid: string, payload: EciesPayload): Promise<void> {
+  await setDoc(doc(db, "sessions", sid, "results", "teamDirectory"), { payload, updatedAt: Date.now() });
+}
+
+export async function getTeamDirectoryDoc(sid: string): Promise<{ payload: EciesPayload } | null> {
+  const snap = await getDoc(doc(db, "sessions", sid, "results", "teamDirectory"));
+  return snap.exists() ? (snap.data() as { payload: EciesPayload }) : null;
+}
+
+export function watchTeams(sid: string, cb: (rows: (TeamDoc & { tokenHash: string })[]) => void): Unsubscribe {
+  return onSnapshot(collection(db, "sessions", sid, "teams"), (snap) => {
+    const rows = snap.docs.map((d) => ({ tokenHash: d.id, ...(d.data() as TeamDoc) }));
+    rows.sort((a, b) => a.teamLabel.localeCompare(b.teamLabel, undefined, { numeric: true }));
+    cb(rows);
+  });
+}
+
+/** Student-side lookup: succeeds only with the team token (rules forbid listing). */
+export async function getTeamByTokenHash(sid: string, tokenHash: string): Promise<TeamDoc | null> {
+  const snap = await getDoc(doc(db, "sessions", sid, "teams", tokenHash));
+  return snap.exists() ? (snap.data() as TeamDoc) : null;
+}
+
+export async function updateContract(sid: string, tokenHash: string, contract: ContractState): Promise<void> {
+  await updateDoc(doc(db, "sessions", sid, "teams", tokenHash), { contract });
+}
+
+const ROUND_FIELD: Record<EvalRoundId, "peerEvalFormative" | "peerEvalSummative"> = {
+  formative: "peerEvalFormative",
+  summative: "peerEvalSummative",
+};
+
+export async function submitPeerEval(
+  sid: string,
+  hash: string,
+  round: EvalRoundId,
+  submission: PeerEvalSubmission,
+): Promise<void> {
+  await updateDoc(doc(db, "sessions", sid, "students", hash), { [ROUND_FIELD[round]]: submission });
+}
+
+export async function withdrawPeerEval(sid: string, hash: string, round: EvalRoundId): Promise<void> {
+  await updateDoc(doc(db, "sessions", sid, "students", hash), { [ROUND_FIELD[round]]: null });
+}
+
+/** Instructor publishes per-student encrypted result views, chunked. */
+export async function publishEvalResults(
+  sid: string,
+  round: EvalRoundId,
+  patches: { hash: string; result: AesEnvelope }[],
+): Promise<void> {
+  const field = round === "formative" ? "resultFormative" : "resultSummative";
+  for (let i = 0; i < patches.length; i += 450) {
+    const batch = writeBatch(db);
+    patches.slice(i, i + 450).forEach((p) => {
+      batch.update(doc(db, "sessions", sid, "students", p.hash), { [field]: p.result });
+    });
+    await batch.commit();
+  }
+}
+
 // ---------- deletion (requirement C: instructor can purge everything) ----------
 
 async function deleteCollectionDocs(sid: string, sub: string): Promise<number> {
@@ -260,16 +369,20 @@ async function deleteCollectionDocs(sid: string, sub: string): Promise<number> {
   return snap.docs.length;
 }
 
-/** Removes every student response and the allocation. Keeps the session shell. */
+/** Removes every student response, the allocation, and all team-management
+ * data (contracts, team directory). Keeps the session shell. */
 export async function purgeStudentData(sid: string): Promise<number> {
   const n = await deleteCollectionDocs(sid, "students");
+  await deleteCollectionDocs(sid, "teams");
   await deleteDoc(doc(db, "sessions", sid, "results", "allocation")).catch(() => {});
+  await deleteDoc(doc(db, "sessions", sid, "results", "teamDirectory")).catch(() => {});
   return n;
 }
 
 /** Deletes the entire session including all subcollections. */
 export async function deleteSessionCompletely(sid: string): Promise<void> {
   await deleteCollectionDocs(sid, "students");
+  await deleteCollectionDocs(sid, "teams");
   await deleteCollectionDocs(sid, "projects");
   await deleteCollectionDocs(sid, "results");
   // The "public" subcollection only ever holds the single "config" doc, and the

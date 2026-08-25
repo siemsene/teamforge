@@ -340,9 +340,44 @@ bullets([
 ]);
 
 // ----------------------------------------------------------------------------
-// 11. Troubleshooting
+// 11. Team management (optional)
 // ----------------------------------------------------------------------------
-h1("11. Troubleshooting & FAQ");
+h1("11. Team management (optional)");
+p(
+  "After you close a session and allocate teams, you can optionally keep using it to run team contracts and peer " +
+    "evaluations. This is entirely optional — if you only need team allocation, ignore this chapter. Enable it from " +
+    "the Overview tab once the session is Closed; two new tabs appear, Teams and Peer evals.",
+);
+h3("Uploading the final roster");
+bullets([
+  "Take the login-codes CSV you downloaded when creating the session and add two columns: name and team (any label, e.g. \"Team 1\" or a project name). Teams may differ from the optimizer's output if you adjusted them.",
+  "On the Teams tab, upload that CSV. Your browser encrypts each student's name and team under a key derived from their own login code, so the platform still never stores names or team membership in plaintext.",
+  "Students log in with the same code they used for the survey.",
+]);
+h3("Team contracts");
+bullets([
+  "Any one team member drafts the contract (communication, attendance, timeliness, respect, effort, integrity, plus custom sections). All members can view and edit it.",
+  "Teams may optionally request AI feedback, revise, and finalize. Every member can save the finalized contract as a PDF.",
+  "You can read every team's contract on the Teams tab after unlocking with your passphrase, and download them all.",
+]);
+h3("Peer evaluations");
+bullets([
+  "Two rounds: a practice (formative) round whose results you can return privately, and a graded (summative) round. Open and close each round on the Peer evals tab.",
+  "The form is fixed: allocate 100 points across teammates (an equal split is legitimate), rate four behaviors 1–5 (optional), and an optional confidential comment to you.",
+  "Watch completion by code number, then unlock to compute each student's team factor. The factor multiplies the team-scored part of a grade: neutral is an equal split (100 ÷ raters), a farthest-from-median rating is discarded on teams of five or more, the proportional gap is halved, and the result is clamped (default 0.80–1.10).",
+  "Factors below 0.90, or teams whose factors spread by more than 0.25, are flagged for your attention before any grade is issued. Export summary and detail CSVs, and optionally publish each student's own factor back to them privately.",
+]);
+note(
+  "AI feedback is optional and clearly bounded",
+  "AI contract feedback runs through a small proxy you deploy (see worker/README.md). It is the one point where contract " +
+    "text — never names — leaves the end-to-end encryption. If you don't configure it, the feature is simply hidden and " +
+    "everything else works. Students see an explicit disclosure and must confirm before any text is sent.",
+);
+
+// ----------------------------------------------------------------------------
+// 12. Troubleshooting
+// ----------------------------------------------------------------------------
+h1("12. Troubleshooting & FAQ");
 const faq = [
   ["“Awaiting approval” after registering.", "Your email is verified but an administrator hasn't approved you yet. You can't create sessions until then."],
   ["I forgot my passphrase.", "Unlock with the recovery key file instead (Allocation tab). Then consider re-creating the session with a passphrase you'll remember."],
@@ -351,6 +386,8 @@ const faq = [
   ["The same category appears twice (e.g. “Woman” and “Female”).", "Use the standard-scale dropdown for both the survey option and the project requirement value so they match exactly; remove the stray option from the survey question."],
   ["The optimizer won't finish / says the problem is large.", "Raise the time limit, reduce the number of teams, or relax some Must constraints to Important."],
   ["Nothing happens when I change something.", "TeamForge shows an inline error if a save fails (e.g. you're offline). Check your connection and try again."],
+  ["The AI feedback button doesn't appear for teams.", "It only shows when the AI proxy is configured (VITE_AI_PROXY_URL) and \"Offer AI contract feedback\" is checked in the Peer evals settings. Without the proxy, contracts still work — just without AI feedback."],
+  ["A peer-eval factor looks off.", "Neutral is 100 divided by the number of teammates who actually rated the student, so partial submissions shift it. On teams of five or more the rating farthest from the median is discarded. Export the detail CSV to see every allocation."],
 ];
 faq.forEach(([q, a]) => {
   h3(q);

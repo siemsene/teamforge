@@ -3,3 +3,25 @@
 body {
   @apply bg-slate-50 text-slate-900 antialiased;
 }
+
+/* Printable contracts: hidden on screen, and the only thing shown when
+ * printing (so "Download PDF" via window.print() yields a clean document). */
+.contract-print {
+  display: none;
+}
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  .contract-print,
+  .contract-print * {
+    visibility: visible;
+  }
+  .contract-print {
+    display: block;
+    position: absolute;
+    inset: 0;
+    padding: 32px;
+    color: #0f172a;
+  }
+}

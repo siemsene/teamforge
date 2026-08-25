@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fileSlug, sessionFilename } from "../src/lib/util";
+import { fileSlug, parseCsv, sessionFilename, toCsv } from "../src/lib/util";
 
 describe("fileSlug", () => {
   it("lowercases and hyphenates titles", () => {
@@ -17,6 +17,28 @@ describe("fileSlug", () => {
 
   it("caps length to keep filenames sane", () => {
     expect(fileSlug("x".repeat(200)).length).toBeLessThanOrEqual(60);
+  });
+});
+
+describe("parseCsv", () => {
+  it("round-trips toCsv output including quotes, commas, and newlines", () => {
+    const rows = [
+      ["code", "name", "team"],
+      ["ABCDE-FGHJK", 'Anna "Ace" O\'Neil, Jr.', "Team 1"],
+      ["MNPQR-STVWX", "Multi\nline", "Team 2"],
+    ];
+    expect(parseCsv(toCsv(rows))).toEqual(rows.map((r) => r.map(String)));
+  });
+
+  it("handles LF-only files and skips blank lines", () => {
+    expect(parseCsv("a,b\n\nc,d\n")).toEqual([
+      ["a", "b"],
+      ["c", "d"],
+    ]);
+  });
+
+  it("keeps empty cells inside non-empty rows", () => {
+    expect(parseCsv("a,,c")).toEqual([["a", "", "c"]]);
   });
 });
 

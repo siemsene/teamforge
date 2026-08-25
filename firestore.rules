@@ -67,6 +67,70 @@ service cloud.firestore {
         && (request.resource.data.submittedAt == null || request.resource.data.submittedAt is number);
     }
 
+    // ---------- team management (optional post-allocation phase) ----------
+
+    function teamMgmtOn(sid) {
+      let s = get(/databases/$(database)/documents/sessions/$(sid)).data;
+      return ("teamMgmt" in s) && s.teamMgmt.enabled == true;
+    }
+
+    // Peer-eval rounds have their own open/closed status, independent of the
+    // session status (evals happen after the session is "closed").
+    function roundOpen(sid, round) {
+      let s = get(/databases/$(database)/documents/sessions/$(sid)).data;
+      return ("teamMgmt" in s) && s.teamMgmt.rounds[round].status == "open";
+    }
+
+    function isAesEnvelope(value) {
+      return value == null
+        || (value is map
+            && value.keys().hasAll(["iv", "ciphertext"])
+            && value.keys().hasOnly(["iv", "ciphertext"])
+            && value.iv is string
+            && value.ciphertext is string);
+    }
+
+    function isPeerEvalSubmission(value) {
+      return value == null
+        || (value is map
+            && value.keys().hasAll(["submittedAt", "payload"])
+            && value.keys().hasOnly(["submittedAt", "payload"])
+            && value.submittedAt is number
+            && isEciesPayload(value.payload));
+    }
+
+    // A student may write exactly one round's submission, only while that round
+    // is open. roster/result*/codeIndex stay owner-only.
+    function isValidPeerEvalUpdate(sid) {
+      let keys = request.resource.data.diff(resource.data).affectedKeys();
+      return (keys.hasOnly(["peerEvalFormative"])
+              && roundOpen(sid, "formative")
+              && isPeerEvalSubmission(request.resource.data.peerEvalFormative))
+          || (keys.hasOnly(["peerEvalSummative"])
+              && roundOpen(sid, "summative")
+              && isPeerEvalSubmission(request.resource.data.peerEvalSummative));
+    }
+
+    // Team members may update only the contract field, with the expected shape.
+    // teamLabel/createdAt are owner-only, so students cannot rename teams.
+    function isValidContractUpdate() {
+      let c = request.resource.data.contract;
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(["contract"])
+        && c is map
+        && c.keys().hasAll(["status", "updatedAt", "updatedByCodeIndex", "content",
+                            "contentForInstructor", "feedback", "feedbackAt", "finalizedAt"])
+        && c.keys().hasOnly(["status", "updatedAt", "updatedByCodeIndex", "content",
+                             "contentForInstructor", "feedback", "feedbackAt", "finalizedAt"])
+        && c.status in ["empty", "draft", "final"]
+        && c.updatedAt is number
+        && (c.updatedByCodeIndex == null || c.updatedByCodeIndex is number)
+        && isAesEnvelope(c.content)
+        && isAesEnvelope(c.feedback)
+        && isEciesPayload(c.contentForInstructor)
+        && (c.feedbackAt == null || c.feedbackAt is number)
+        && (c.finalizedAt == null || c.finalizedAt is number);
+    }
+
     match /users/{uid} {
       // Self-registration always starts unapproved.
       allow create: if isSignedIn()
@@ -105,11 +169,23 @@ service cloud.firestore {
         allow get: if isSignedIn();
         allow list, create, delete: if ownsSession(sid);
         // Students may only write their encrypted response while the survey is
-        // open, and may not touch codeIndex.
+        // open (or a peer-eval submission while that round is open), and may
+        // not touch codeIndex.
         allow update: if ownsSession(sid)
           || (isSignedIn()
               && sessionIsOpen(sid)
-              && isValidStudentResponseUpdate());
+              && isValidStudentResponseUpdate())
+          || (isSignedIn() && isValidPeerEvalUpdate(sid));
+      }
+
+      // Team contract docs. Doc id = SHA-256 of an unguessable team token that
+      // is distributed only inside each member's encrypted roster blob —
+      // get-not-list, mirroring the login-code capability model.
+      match /teams/{tokenHash} {
+        allow get: if isSignedIn();
+        allow list, create, delete: if ownsSession(sid);
+        allow update: if ownsSession(sid)
+          || (isSignedIn() && teamMgmtOn(sid) && isValidContractUpdate());
       }
 
       match /results/{docId} {

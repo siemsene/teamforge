@@ -7,6 +7,8 @@ import { SurveyTab } from "../survey-builder/SurveyTab";
 import { ConstraintsTab } from "../constraints/ConstraintsTab";
 import { ResponsesTab } from "../completion/ResponsesTab";
 import { AllocationTab } from "../allocation/AllocationTab";
+import { TeamsTab } from "../teams/TeamsTab";
+import { PeerEvalsTab } from "../evals/PeerEvalsTab";
 import { Badge, Spinner } from "../../components/ui";
 import { getSessionReadiness } from "./readiness";
 
@@ -14,6 +16,7 @@ const STATUS_TONE = { draft: "gray", open: "green", closed: "amber" } as const;
 
 function Tabs() {
   const { session } = useSession();
+  const teamMgmt = !!session.teamMgmt?.enabled;
   const tabs = [
     { to: "", label: "Overview", end: true },
     ...(session.genericProjects ? [] : [{ to: "projects", label: "Projects" }]),
@@ -21,6 +24,12 @@ function Tabs() {
     { to: "constraints", label: "Constraints" },
     { to: "responses", label: "Responses" },
     { to: "allocation", label: "Allocation" },
+    ...(teamMgmt
+      ? [
+          { to: "teams", label: "Teams" },
+          { to: "evals", label: "Peer evals" },
+        ]
+      : []),
     { to: "privacy", label: "Privacy & data" },
   ];
   return (
@@ -55,6 +64,7 @@ function SessionBody() {
       <div className="mb-2 flex items-center gap-3">
         <h1 className="text-2xl font-bold">{session.title}</h1>
         <Badge tone={STATUS_TONE[session.status]}>{session.status}</Badge>
+        {session.teamMgmt?.enabled && <Badge tone="indigo">team management</Badge>}
       </div>
       <SetupProgress
         hasProjects={session.genericProjects || projects.length > 0}
@@ -64,6 +74,11 @@ function SessionBody() {
         submitted={students.filter((s) => s.submittedAt).length}
         total={students.length}
         hasAllocation={session.status === "closed"}
+        teamMgmt={
+          session.teamMgmt?.enabled
+            ? { rostered: session.teamMgmt.rosterUploadedAt != null }
+            : undefined
+        }
       />
       <Tabs />
       <Routes>
@@ -73,6 +88,8 @@ function SessionBody() {
         <Route path="constraints" element={<ConstraintsTab />} />
         <Route path="responses" element={<ResponsesTab />} />
         <Route path="allocation" element={<AllocationTab />} />
+        <Route path="teams" element={<TeamsTab />} />
+        <Route path="evals" element={<PeerEvalsTab />} />
         <Route path="privacy" element={<PrivacyTab />} />
         <Route path="*" element={<Navigate to="." replace />} />
       </Routes>
@@ -88,6 +105,7 @@ function SetupProgress({
   submitted,
   total,
   hasAllocation,
+  teamMgmt,
 }: {
   hasProjects: boolean;
   hasSurvey: boolean;
@@ -96,6 +114,7 @@ function SetupProgress({
   submitted: number;
   total: number;
   hasAllocation: boolean;
+  teamMgmt?: { rostered: boolean };
 }) {
   const steps = [
     { label: "Teams", done: hasProjects },
@@ -104,6 +123,7 @@ function SetupProgress({
     { label: "Ready", done: isReady },
     { label: "Responses", done: total > 0 && submitted === total, note: `${submitted}/${total}` },
     { label: "Allocation", done: hasAllocation },
+    ...(teamMgmt ? [{ label: "Roster", done: teamMgmt.rostered }] : []),
   ];
   return (
     <div className="mb-4 overflow-x-auto rounded-md border border-slate-200 bg-white px-3 py-2">

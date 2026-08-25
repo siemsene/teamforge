@@ -1,15 +1,16 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSession } from "../sessions/SessionContext";
 import { getAllocationDoc, saveAllocation } from "../../lib/db";
-import { eciesDecrypt, eciesEncrypt, unlockWithPassphrase, unlockWithRecoveryKey } from "../../lib/crypto";
+import { eciesDecrypt, eciesEncrypt } from "../../lib/crypto";
 import { normalizeCode } from "../../lib/codes";
 import { downloadFile, sessionFilename, toCsv } from "../../lib/util";
 import { evaluateAssignment } from "../../solver/evaluate";
 import type { SolveResult, SolverInput, SolverStudent, SolverTeam, WorkerResponse } from "../../solver/types";
 import type { Allocation, SurveyAnswers } from "../../types";
-import { Button, Card, ErrorText, Field, Input, NumberInput, Spinner } from "../../components/ui";
+import { Button, Card, ErrorText, Field, NumberInput, Spinner } from "../../components/ui";
 import { TeamBoard } from "./TeamBoard";
 import { getSessionReadiness } from "../sessions/readiness";
+import { UnlockPanel } from "../sessions/UnlockPanel";
 
 type Phase =
   | { name: "locked" }
@@ -23,7 +24,7 @@ interface ResponseProblem {
 }
 
 export function AllocationTab() {
-  const { sid, session, publicConfig, projects, students } = useSession();
+  const { sid, session, publicConfig, projects, students, sessionKey, setSessionKey } = useSession();
   const [phase, setPhase] = useState<Phase>({ name: "locked" });
   const [error, setError] = useState("");
   const [info, setInfo] = useState("");
@@ -73,10 +74,21 @@ export function AllocationTab() {
 
   useEffect(() => () => workerRef.current?.terminate(), []);
 
+  // If another tab already unlocked this session, decrypt immediately.
+  const decryptedRef = useRef(false);
+  useEffect(() => {
+    if (sessionKey && !decryptedRef.current) {
+      decryptedRef.current = true;
+      void unlocked(sessionKey);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionKey]);
+
   // ---------- unlock & decrypt ----------
 
   async function unlocked(privateKey: CryptoKey) {
     privateKeyRef.current = privateKey;
+    if (!sessionKey) setSessionKey(privateKey);
     setPhase({ name: "decrypting" });
     setError("");
     try {
@@ -300,58 +312,5 @@ export function AllocationTab() {
         />
       )}
     </div>
-  );
-}
-
-function UnlockPanel({
-  wrapped,
-  error,
-  onUnlocked,
-}: {
-  wrapped: import("../../types").WrappedKeys;
-  error: string;
-  onUnlocked: (key: CryptoKey) => void;
-}) {
-  const [passphrase, setPassphrase] = useState("");
-  const [recovery, setRecovery] = useState("");
-  const [localError, setLocalError] = useState("");
-  const [busy, setBusy] = useState(false);
-
-  async function submit(e: FormEvent) {
-    e.preventDefault();
-    setLocalError("");
-    setBusy(true);
-    try {
-      const key = passphrase
-        ? await unlockWithPassphrase(wrapped, passphrase)
-        : await unlockWithRecoveryKey(wrapped, recovery);
-      onUnlocked(key);
-    } catch {
-      setLocalError("Could not unlock — wrong passphrase or recovery key.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <Card className="max-w-lg">
-      <h2 className="mb-2 font-semibold">Unlock student data</h2>
-      <p className="mb-3 text-sm text-slate-600">
-        Responses are encrypted; decryption happens only in this browser tab and nothing decrypted is ever uploaded.
-        Enter your session passphrase (or paste the recovery key from your backup file).
-      </p>
-      <form onSubmit={submit} className="space-y-3">
-        <Field label="Session passphrase">
-          <Input type="password" value={passphrase} onChange={(e) => setPassphrase(e.target.value)} />
-        </Field>
-        <Field label="… or recovery key">
-          <Input value={recovery} onChange={(e) => setRecovery(e.target.value)} placeholder="Base64 recovery key" />
-        </Field>
-        <ErrorText>{localError || error}</ErrorText>
-        <Button type="submit" disabled={busy || (!passphrase && !recovery)}>
-          {busy ? "Unlocking…" : "Unlock"}
-        </Button>
-      </form>
-    </Card>
   );
 }

@@ -156,6 +156,150 @@ export const WEIGHT_VALUES: Record<ConstraintWeight, number> = {
   nice: 10,
 };
 
+// ---------- Team management (optional post-allocation phase) ----------
+
+export type EvalRoundId = "formative" | "summative";
+export type RoundStatus = "pending" | "open" | "closed";
+
+export interface EvalRoundConfig {
+  status: RoundStatus;
+  /** Free-text shown to students, e.g. "Opens Mon Oct 6, closes Fri Oct 10". */
+  note?: string;
+  openedAt?: number;
+  closedAt?: number;
+  resultsPublishedAt?: number;
+}
+
+/** Owner-only configuration on SessionDoc.teamMgmt. */
+export interface TeamMgmtConfig {
+  enabled: boolean;
+  rosterUploadedAt: number | null;
+  /** Team-factor clamp, e.g. 0.80–1.10. */
+  factorFloor: number;
+  factorCeiling: number;
+  /** Part 2 of the peer eval (behavior ratings) on/off. */
+  includeBehaviors: boolean;
+  behaviors: string[];
+  aiFeedbackEnabled: boolean;
+  rounds: Record<EvalRoundId, EvalRoundConfig>;
+}
+
+export interface ContractSectionDef {
+  id: string;
+  title: string;
+  /** Guidance shown to teams while writing this section. */
+  prompt: string;
+}
+
+/** Student-visible mirror of team-management settings on PublicConfig.teamMgmt. */
+export interface PublicTeamMgmt {
+  enabled: boolean;
+  includeBehaviors: boolean;
+  behaviors: string[];
+  aiFeedbackEnabled: boolean;
+  contractSections: ContractSectionDef[];
+  rounds: Record<EvalRoundId, { status: RoundStatus; note?: string; resultsPublished?: boolean }>;
+}
+
+/** AES-256-GCM ciphertext under a symmetric derived key (member key or team key). */
+export interface AesEnvelope {
+  iv: string; // base64
+  ciphertext: string; // base64
+}
+
+export interface PeerEvalSubmission {
+  submittedAt: number;
+  /** ECIES to the session public key — instructor-only readable. */
+  payload: EciesPayload;
+}
+
+/** Decrypted contents of a student's roster blob (never stored plaintext). */
+export interface RosterInfo {
+  /** This student's own stable identifier (their code index). */
+  codeIndex: number;
+  /** This student's own name (as the instructor entered it). */
+  name: string;
+  /** Capability for the team doc and team key; never shown to the student. */
+  teamToken: string;
+  teamLabel: string;
+  /** Excludes self; codeIndex is the stable ratee identifier. */
+  teammates: { codeIndex: number; name: string }[];
+}
+
+/** Decrypted peer-evaluation answers (never stored plaintext). */
+export interface PeerEvalAnswers {
+  round: EvalRoundId;
+  raterCodeIndex: number;
+  teamLabel: string;
+  /** Ratee codeIndex (as string key) -> 0..100; must sum to 100. */
+  points: Record<string, number>;
+  /** Required where the allocation is < 15 or > 40 (waived for tiny teams). */
+  justifications: Record<string, string>;
+  /** Ratee codeIndex -> one 1..5 value per behavior. */
+  behaviorRatings?: Record<string, number[]>;
+  /** Part 3: optional, confidential to the instructor. */
+  commentToInstructor?: string;
+}
+
+/** What a student sees when round results are published to them. */
+export interface EvalResultView {
+  round: EvalRoundId;
+  teamLabel: string;
+  raterCount: number;
+  neutralShare: number;
+  /** null when raterCount < 3 (anonymity guard — factor only). */
+  adjustedMeanPoints: number | null;
+  factor: number;
+  behaviorAverages?: number[];
+  note?: string;
+}
+
+export interface ContractContent {
+  version: number;
+  sections: { id: string; title: string; text: string }[];
+}
+
+export interface ContractFeedback {
+  overall: string;
+  sections: { id: string; strengths: string; risks: string; suggestions: string }[];
+}
+
+export type ContractStatus = "empty" | "draft" | "final";
+
+export interface ContractState {
+  status: ContractStatus;
+  updatedAt: number | null;
+  /** Last-write-wins concurrency marker: which member saved last. */
+  updatedByCodeIndex: number | null;
+  /** Team-key encrypted ContractContent. */
+  content: AesEnvelope | null;
+  /** The same plaintext, ECIES to the session public key, for the instructor. */
+  contentForInstructor: EciesPayload | null;
+  /** Team-key encrypted ContractFeedback. */
+  feedback: AesEnvelope | null;
+  feedbackAt: number | null;
+  finalizedAt: number | null;
+}
+
+/** sessions/{sid}/teams/{tokenHash}; doc id = SHA-256(teamToken). */
+export interface TeamDoc {
+  teamLabel: string;
+  createdAt: number;
+  contract: ContractState;
+}
+
+/** Instructor-only directory, ECIES-encrypted at sessions/{sid}/results/teamDirectory. */
+export interface TeamDirectory {
+  createdAt: number;
+  teams: {
+    token: string;
+    label: string;
+    members: { codeIndex: number; codeHash: string; name: string }[];
+  }[];
+  /** codeHash -> base64 raw member key, so publishing results never needs the codes CSV again. */
+  memberKeys: Record<string, string>;
+}
+
 // ---------- Crypto envelope ----------
 
 export interface EciesPayload {
@@ -196,6 +340,8 @@ export interface SessionDoc {
   wrappedKeys: WrappedKeys;
   /** Instructor-editable invitation email shown on the overview tab. */
   emailTemplate?: string;
+  /** Optional post-allocation phase: contracts + peer evaluations. */
+  teamMgmt?: TeamMgmtConfig;
   createdAt: number;
   updatedAt: number;
 }
@@ -213,6 +359,8 @@ export interface PublicConfig {
   projects: { id: string; name: string; description: string }[];
   genericProjects: boolean;
   privacyNote: string;
+  /** Present when the instructor enabled team management. */
+  teamMgmt?: PublicTeamMgmt;
 }
 
 export interface StudentDoc {
@@ -222,6 +370,15 @@ export interface StudentDoc {
   shareCode?: string;
   submittedAt: number | null;
   response: EciesPayload | null;
+  // ----- team management (all optional; absent on allocation-only sessions) -----
+  /** Member-key encrypted RosterInfo, written by the instructor. */
+  roster?: AesEnvelope | null;
+  /** Student-written, ECIES to the session public key. */
+  peerEvalFormative?: PeerEvalSubmission | null;
+  peerEvalSummative?: PeerEvalSubmission | null;
+  /** Member-key encrypted EvalResultView, written by the instructor. */
+  resultFormative?: AesEnvelope | null;
+  resultSummative?: AesEnvelope | null;
 }
 
 /** Decrypted survey answers, keyed by question id. */

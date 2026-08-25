@@ -1,11 +1,19 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useSession } from "./SessionContext";
-import { deleteSessionCompletely, updateSession, updateSessionStatus } from "../../lib/db";
+import {
+  deleteSessionCompletely,
+  saveTeamMgmt,
+  updatePublicConfig,
+  updateSession,
+  updateSessionStatus,
+} from "../../lib/db";
 import { surveyUrl } from "../../lib/util";
 import type { SessionStatus } from "../../types";
 import { Button, Card, ConfirmDialog, ErrorText, TextArea } from "../../components/ui";
 import { getSessionReadiness } from "./readiness";
+import { defaultTeamMgmtConfig, publicTeamMgmt } from "../teams/contractTemplate";
+import { DEFAULT_PRIVACY_NOTE, TEAM_MGMT_PRIVACY_NOTE } from "./privacyNote";
 
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -69,6 +77,25 @@ export function OverviewTab() {
     } catch (e) {
       setError(`Could not save the email template: ${errMsg(e)}`);
     } finally {
+      setBusy(false);
+    }
+  }
+
+  async function enableTeamManagement() {
+    setBusy(true);
+    setError("");
+    try {
+      const config = { ...defaultTeamMgmtConfig(), rosterUploadedAt: null };
+      await saveTeamMgmt(sid, config, publicTeamMgmt(config));
+      // Append the team-management privacy disclosure to the student-facing note
+      // (once — guard against double-append if re-enabled).
+      if (!publicConfig.privacyNote.includes(TEAM_MGMT_PRIVACY_NOTE)) {
+        const base = publicConfig.privacyNote || DEFAULT_PRIVACY_NOTE;
+        await updatePublicConfig(sid, { privacyNote: `${base}\n\n${TEAM_MGMT_PRIVACY_NOTE}` });
+      }
+      navigate(`/session/${sid}/teams`);
+    } catch (e) {
+      setError(`Could not enable team management: ${errMsg(e)}`);
       setBusy(false);
     }
   }
@@ -182,6 +209,34 @@ export function OverviewTab() {
           {savedMsg && <span className="text-sm text-green-700">{savedMsg}</span>}
         </div>
       </Card>
+
+      {session.status === "closed" && (
+        <Card>
+          <h2 className="mb-2 font-semibold">Team management (optional)</h2>
+          {session.teamMgmt?.enabled ? (
+            <div className="flex items-center justify-between gap-4">
+              <p className="text-sm text-slate-600">
+                Team management is enabled. Manage the roster and contracts on the <strong>Teams</strong> tab and run
+                peer evaluations on the <strong>Peer evals</strong> tab.
+              </p>
+              <Button variant="secondary" onClick={() => navigate(`/session/${sid}/teams`)}>
+                Go to Teams
+              </Button>
+            </div>
+          ) : (
+            <div className="flex items-center justify-between gap-4">
+              <p className="text-sm text-slate-600">
+                Continue using this session after allocation: let teams write a contract (with optional AI feedback)
+                and run two rounds of peer evaluations. Names stay end-to-end encrypted. You can turn this on now and
+                upload the final team roster.
+              </p>
+              <Button onClick={enableTeamManagement} disabled={busy}>
+                Enable team management
+              </Button>
+            </div>
+          )}
+        </Card>
+      )}
 
       <Card className="border-red-200">
         <h2 className="mb-2 font-semibold text-red-700">Danger zone</h2>
