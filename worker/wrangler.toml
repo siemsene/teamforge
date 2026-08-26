@@ -11,7 +11,8 @@ compatibility_flags = ["nodejs_compat"]
 [vars]
 ALLOWED_ORIGINS = "https://teamforge.edutool.org,https://teamforge-b1fa9.web.app,https://teamforge-b1fa9.firebaseapp.com"
 MODEL = "claude-sonnet-5"
-DAILY_CAP = "500"
+# The real control on API-key spend: the origin check only stops browsers.
+DAILY_CAP = "120"
 HOURLY_PER_IP = "10"
 
 # Rate-limit counters. Create with:

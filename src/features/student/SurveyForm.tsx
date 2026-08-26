@@ -3,6 +3,9 @@ import { normalizeCode } from "../../lib/codes";
 import type { ProjectRankingQuestion, PublicConfig, Question, SurveyAnswers, TeammatesQuestion } from "../../types";
 import { Button, Card, ErrorText, Select } from "../../components/ui";
 
+/** DOM id of a question's card, so validation can scroll to it. */
+const questionCardId = (questionId: string) => `q-${questionId}`;
+
 export function SurveyForm({
   config,
   busy,
@@ -19,19 +22,20 @@ export function SurveyForm({
     setAnswers((a) => ({ ...a, [id]: value }));
   }
 
-  function validate(): string | null {
+  /** The first unanswered required question, with something to say about it. */
+  function validate(): { id: string; message: string } | null {
     for (const q of config.questions) {
       const v = answers[q.id];
       if (!q.required) continue;
       if (q.kind === "projectRanking") {
         const ranked = (v as string[] | undefined) ?? [];
         if (ranked.filter(Boolean).length < q.rankCount)
-          return `Please rank ${q.rankCount} projects ("${q.prompt}").`;
+          return { id: q.id, message: `Please rank ${q.rankCount} projects ("${q.prompt}").` };
         continue;
       }
       if (q.kind === "teammates") continue; // always optional in spirit
       if (v === undefined || v === "" || (Array.isArray(v) && v.length === 0))
-        return `Please answer: "${q.prompt}"`;
+        return { id: q.id, message: `Please answer: "${q.prompt}"` };
     }
     return null;
   }
@@ -40,7 +44,13 @@ export function SurveyForm({
     e.preventDefault();
     const problem = validate();
     if (problem) {
-      setError(problem);
+      setError(problem.message);
+      // The message sits at the foot of a form that can run to a dozen cards, so
+      // on its own it says something is wrong without saying where. Take the
+      // student to the question instead of leaving them to hunt for it.
+      const card = document.getElementById(questionCardId(problem.id));
+      card?.scrollIntoView({ behavior: "smooth", block: "center" });
+      card?.querySelector<HTMLElement>("input, button, select, textarea")?.focus({ preventScroll: true });
       return;
     }
     setError("");
@@ -58,7 +68,7 @@ export function SurveyForm({
   return (
     <form onSubmit={submit} className="space-y-4">
       {config.questions.map((q, i) => (
-        <Card key={q.id}>
+        <Card key={q.id} id={questionCardId(q.id)}>
           <p className="mb-2 font-medium">
             {i + 1}. {q.prompt}
             {q.required && q.kind !== "teammates" && <span className="text-red-500"> *</span>}
@@ -87,14 +97,20 @@ function QuestionInput({
 }) {
   if (q.kind === "number") {
     const current = typeof value === "number" ? value : undefined;
+    // These are radio groups drawn as buttons. Without the roles a screen reader
+    // reads out "1 2 3 4 5" with no way to tell which one is chosen — the
+    // peer-eval form's identical control already does this properly.
+    //
     // When points carry words, lay them out vertically so each label is readable.
     if (q.labels?.length) {
       return (
-        <div className="space-y-1">
+        <div className="space-y-1" role="radiogroup" aria-label={q.prompt}>
           {Array.from({ length: q.max - q.min + 1 }, (_, i) => q.min + i).map((n, i) => (
             <button
               key={n}
               type="button"
+              role="radio"
+              aria-checked={current === n}
               onClick={() => onChange(n)}
               className={`flex w-full items-center gap-3 rounded-md border px-3 py-1.5 text-left text-sm ${
                 current === n
@@ -110,11 +126,14 @@ function QuestionInput({
       );
     }
     return (
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap gap-2" role="radiogroup" aria-label={q.prompt}>
         {Array.from({ length: q.max - q.min + 1 }, (_, i) => q.min + i).map((n) => (
           <button
             key={n}
             type="button"
+            role="radio"
+            aria-checked={current === n}
+            aria-label={`${n} out of ${q.max}`}
             onClick={() => onChange(n)}
             className={`h-9 w-9 rounded-md border text-sm font-medium ${
               current === n ? "border-indigo-600 bg-indigo-600 text-white" : "border-slate-300 bg-white hover:bg-slate-50"
@@ -197,9 +216,14 @@ function ProjectRankingInput({
         ))}
       </div>
       {Array.from({ length: q.rankCount }, (_, i) => (
-        <div key={i} className="flex items-center gap-2 text-sm">
+        <label key={i} className="flex items-center gap-2 text-sm">
           <span className="w-24 text-slate-600">Choice {i + 1}:</span>
-          <Select value={ranked[i] ?? ""} onChange={(e) => setRank(i, e.target.value)} className="flex-1">
+          <Select
+            aria-label={`Choice ${i + 1} of ${q.rankCount}`}
+            value={ranked[i] ?? ""}
+            onChange={(e) => setRank(i, e.target.value)}
+            className="flex-1"
+          >
             <option value="">— select a project —</option>
             {config.projects.map((p) => (
               <option key={p.id} value={p.id}>
@@ -207,7 +231,7 @@ function ProjectRankingInput({
               </option>
             ))}
           </Select>
-        </div>
+        </label>
       ))}
     </div>
   );
@@ -232,8 +256,12 @@ function TeammatesInput({
       {Array.from({ length: q.maxCodes }, (_, i) => (
         <input
           key={i}
+          // A placeholder is not a label: it disappears on focus and screen
+          // readers may skip it, leaving three identical unnamed boxes.
+          aria-label={`Classmate share code ${i + 1} of ${q.maxCodes}`}
           className="w-full rounded-md border border-slate-300 px-3 py-1.5 font-mono text-sm uppercase focus:border-indigo-500 focus:outline-none sm:w-56"
           placeholder="XXXX"
+          maxLength={8}
           value={codes[i] ?? ""}
           onChange={(e) => {
             const next = [...codes];

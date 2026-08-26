@@ -1,8 +1,13 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSession } from "../sessions/SessionContext";
 import { saveTeamMgmt } from "../../lib/db";
 import { publicTeamMgmt } from "../teams/contractTemplate";
-import { resolveFactorParams, shareToFactor } from "../../lib/teamFactor";
+import {
+  maxTeamSizeForNegativeSum,
+  resolveFactorParams,
+  scapegoatingIsNegativeSum,
+  shareToFactor,
+} from "../../lib/teamFactor";
 import { neutralRange } from "../../lib/evalValidation";
 import type { EvalRoundId, RoundStatus, TeamMgmtConfig } from "../../types";
 import { Badge, Button, Card, ErrorText, Field, NumberInput } from "../../components/ui";
@@ -50,7 +55,7 @@ export function PeerEvalsTab() {
 }
 
 function SettingsCard({ config }: { config: TeamMgmtConfig }) {
-  const { sid } = useSession();
+  const { sid, session } = useSession();
   const params = resolveFactorParams(config);
   const [floor, setFloor] = useState(params.factorFloor);
   const [ceiling, setCeiling] = useState(params.factorCeiling);
@@ -62,13 +67,38 @@ function SettingsCard({ config }: { config: TeamMgmtConfig }) {
   const [msg, setMsg] = useState("");
   const [error, setError] = useState("");
 
+  // useState only reads its initial value once, so a config changed elsewhere —
+  // another tab, or this instructor's own save — left the form showing stale
+  // numbers and calling itself dirty against them. Re-seed when the saved
+  // values actually move.
+  const saved = `${params.factorFloor}|${params.factorCeiling}|${params.deadband}|${params.damping}|${config.includeBehaviors}|${config.aiFeedbackEnabled}`;
+  const lastSaved = useRef(saved);
+  useEffect(() => {
+    if (lastSaved.current === saved) return;
+    lastSaved.current = saved;
+    setFloor(params.factorFloor);
+    setCeiling(params.factorCeiling);
+    setDeadband(params.deadband);
+    setDamping(params.damping);
+    setIncludeBehaviors(config.includeBehaviors);
+    setAiEnabled(config.aiFeedbackEnabled);
+  }, [saved, params.factorFloor, params.factorCeiling, params.deadband, params.damping, config.includeBehaviors, config.aiFeedbackEnabled]);
+
   // Uses the values currently in the form, so the effect is visible before saving.
   const previewParams = { factorFloor: floor, factorCeiling: ceiling, deadband, damping };
+  // Worked through at the largest team this session actually allows, rather than
+  // at a fixed five: the caps' most important property depends on team size, and
+  // an example that quietly assumes a smaller team than the instructor set would
+  // be reassuring about a session other than theirs.
+  const exampleSize = Math.max(2, session.maxTeamSize);
   const preview = {
-    band: neutralRange(4, deadband),
+    band: neutralRange(exampleSize - 1, deadband),
+    even: Math.round(100 / (exampleSize - 1)),
     strong: shareToFactor(1.2, previewParams),
     weak: shareToFactor(0.6, previewParams),
   };
+  const negativeSum = scapegoatingIsNegativeSum(exampleSize, previewParams);
+  const safeUpTo = maxTeamSizeForNegativeSum(previewParams);
 
   const dirty =
     floor !== params.factorFloor ||
@@ -181,10 +211,12 @@ function SettingsCard({ config }: { config: TeamMgmtConfig }) {
       </div>
 
       <div className="mt-4 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm">
-        <p className="mb-1 font-medium text-slate-700">What these settings do, on a team of five</p>
+        <p className="mb-1 font-medium text-slate-700">
+          What these settings do, on a team of {exampleSize} — this session&rsquo;s largest
+        </p>
         <ul className="space-y-0.5 text-slate-600">
           <li>
-            An even split is 25 points each. Anything from <strong>{preview.band.low}</strong> to{" "}
+            An even split is {preview.even} points each. Anything from <strong>{preview.band.low}</strong> to{" "}
             <strong>{preview.band.high}</strong> still counts as even: factor 1.00, and no justification asked for.
           </li>
           <li>
@@ -193,10 +225,38 @@ function SettingsCard({ config }: { config: TeamMgmtConfig }) {
             <strong>{preview.weak.toFixed(2)}</strong>.
           </li>
           <li>
-            The furthest two teammates can end apart is <strong>{(ceiling - floor).toFixed(2)}</strong>, and no group
-            can gain more in total than the one member they mark down loses.
+            The furthest two teammates can end apart is <strong>{(ceiling - floor).toFixed(2)}</strong>.
+          </li>
+          <li>
+            {negativeSum ? (
+              <>
+                A group agreeing to mark one member down gains at most{" "}
+                <strong>{((exampleSize - 1) * (ceiling - 1)).toFixed(2)}</strong> between them while that member loses{" "}
+                <strong>{(1 - floor).toFixed(2)}</strong> — so the play costs the team more than it wins.
+              </>
+            ) : (
+              <>
+                On a team this size the {exampleSize - 1} others would gain{" "}
+                <strong>{((exampleSize - 1) * (ceiling - 1)).toFixed(2)}</strong> between them while the member they
+                mark down loses only <strong>{(1 - floor).toFixed(2)}</strong> — so scapegoating pays.
+              </>
+            )}
           </li>
         </ul>
+        {!negativeSum && (
+          <p className="mt-2 rounded-md border border-amber-200 bg-amber-50 p-2 text-amber-900">
+            {safeUpTo < 2 ? (
+              <>These caps do not make scapegoating unprofitable at any team size.</>
+            ) : (
+              <>
+                These caps only make scapegoating unprofitable up to a team of <strong>{safeUpTo}</strong>, and this
+                session allows {exampleSize}.
+              </>
+            )}{" "}
+            Lower the highest factor, or lower the floor, to restore that — the arithmetic is (team size &minus; 1)
+            &times; (ceiling &minus; 1) &lt; (1 &minus; floor).
+          </p>
+        )}
       </div>
 
       <div className="mt-3 flex items-center gap-2">

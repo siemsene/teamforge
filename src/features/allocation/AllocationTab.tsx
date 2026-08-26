@@ -12,6 +12,16 @@ import { TeamBoard } from "./TeamBoard";
 import { getSessionReadiness } from "../sessions/readiness";
 import { UnlockPanel } from "../sessions/UnlockPanel";
 
+/** Order-independent fingerprint of an assignment, for comparing against the
+ * saved copy: reordering members within a team is not a change. */
+function stableKey(a: Record<string, string[]>): string {
+  return JSON.stringify(
+    Object.entries(a)
+      .map(([id, hashes]) => [id, [...hashes].sort()] as const)
+      .sort(([x], [y]) => x.localeCompare(y)),
+  );
+}
+
 type Phase =
   | { name: "locked" }
   | { name: "decrypting" }
@@ -31,7 +41,13 @@ export function AllocationTab() {
   const privateKeyRef = useRef<CryptoKey | null>(null);
   const [solverStudents, setSolverStudents] = useState<SolverStudent[] | null>(null);
   const [assignment, setAssignment] = useState<Record<string, string[]> | null>(null);
+  // What is actually stored, so the board can say when it has drifted from it.
+  // The Teams tab builds its roster from the *saved* allocation, so a drag left
+  // unsaved would silently never reach a student.
+  const [savedAssignment, setSavedAssignment] = useState<string | null>(null);
   const [responseProblems, setResponseProblems] = useState<ResponseProblem[]>([]);
+  /** Teammate share codes that matched nobody in this session. */
+  const [unmatchedCodes, setUnmatchedCodes] = useState<{ codeIndex: number; codes: string[] }[]>([]);
   const workerRef = useRef<Worker | null>(null);
   const [timeLimit, setTimeLimit] = useState(60);
   const readiness = useMemo(() => getSessionReadiness(session, publicConfig, projects), [session, publicConfig, projects]);
@@ -72,6 +88,17 @@ export function AllocationTab() {
     return evaluateAssignment(solverInput, assignment);
   }, [solverInput, assignment]);
 
+  const dirty = assignment != null && stableKey(assignment) !== savedAssignment;
+
+  // Reloads and tab closes are the browser's to warn about; in-app navigation is
+  // handled by the banner on the board itself.
+  useEffect(() => {
+    if (!dirty) return;
+    const warn = (e: BeforeUnloadEvent) => e.preventDefault();
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [dirty]);
+
   useEffect(() => () => workerRef.current?.terminate(), []);
 
   // If another tab already unlocked this session, decrypt immediately.
@@ -100,14 +127,22 @@ export function AllocationTab() {
       );
       const decrypted: SolverStudent[] = [];
       const problems: ResponseProblem[] = [];
+      const unmatched: { codeIndex: number; codes: string[] }[] = [];
       for (const s of students) {
         let answers: SurveyAnswers = {};
         if (s.response) {
           try {
             answers = JSON.parse(await eciesDecrypt(privateKey, s.response)) as SurveyAnswers;
             if (teammatesQ && Array.isArray(answers[teammatesQ.id])) {
-              answers[teammatesQ.id] = (answers[teammatesQ.id] as string[])
-                .map((code) => shareToHash.get(normalizeCode(code)))
+              const entered = answers[teammatesQ.id] as string[];
+              const resolved = entered.map((code) => ({ code, hash: shareToHash.get(normalizeCode(code)) }));
+              // A mistyped share code used to be dropped in silence: the student
+              // believed their preference was recorded and the instructor never
+              // learned it had gone. Neither can act on what nobody is told.
+              const missed = resolved.filter((r) => !r.hash).map((r) => r.code);
+              if (missed.length > 0) unmatched.push({ codeIndex: s.codeIndex, codes: missed });
+              answers[teammatesQ.id] = resolved
+                .map((r) => r.hash)
                 .filter((h): h is string => Boolean(h));
             }
           } catch (err) {
@@ -121,6 +156,7 @@ export function AllocationTab() {
       }
       setSolverStudents(decrypted);
       setResponseProblems(problems);
+      setUnmatchedCodes(unmatched);
 
       // Load a previously saved allocation if there is one.
       const saved = await getAllocationDoc(sid);
@@ -128,6 +164,7 @@ export function AllocationTab() {
         try {
           const alloc = JSON.parse(await eciesDecrypt(privateKey, saved.payload)) as Allocation;
           setAssignment(alloc.teams);
+          setSavedAssignment(stableKey(alloc.teams));
           setInfo("Loaded the previously saved allocation.");
         } catch (err) {
           setInfo(
@@ -197,20 +234,34 @@ export function AllocationTab() {
     const alloc: Allocation = { teams: assignment, objective: evaluation.totalPenalty, solvedAt: Date.now() };
     const payload = await eciesEncrypt(session.wrappedKeys.publicKeyJwk, JSON.stringify(alloc));
     await saveAllocation(sid, payload);
+    setSavedAssignment(stableKey(assignment));
     setInfo("Allocation saved (encrypted).");
   }
 
   function exportCsv() {
     if (!assignment || !solverStudents) return;
     const byHash = new Map(solverStudents.map((s) => [s.hash, s]));
+    const nameById = new Map(teams.map((t) => [t.id, t.name]));
     const rows: (string | number)[][] = [["team", "studentIndex"]];
-    for (const t of teams) {
-      for (const h of assignment[t.id] ?? []) {
+    const orphaned: string[] = [];
+    // Walk the assignment, not the current team list. A project renamed or
+    // deleted since the allocation was saved leaves its id unmatched, and
+    // iterating the teams instead dropped those students from the file with
+    // nothing said — the roster join reports exactly this case, so this does too.
+    for (const [teamId, hashes] of Object.entries(assignment)) {
+      const label = nameById.get(teamId);
+      if (label == null && hashes.length > 0) orphaned.push(teamId);
+      for (const h of hashes) {
         const s = byHash.get(h);
-        if (s) rows.push([t.name, s.codeIndex]);
+        if (s) rows.push([label ?? teamId, s.codeIndex]);
       }
     }
     downloadFile(sessionFilename(session.title, sid, "teams.csv"), toCsv(rows), "text/csv");
+    setInfo(
+      orphaned.length > 0
+        ? `Exported ${rows.length - 1} students. ${orphaned.length} team${orphaned.length === 1 ? "" : "s"} in the saved allocation no longer match a project, so ${orphaned.length === 1 ? "its id was" : "their ids were"} used as the label: ${orphaned.join(", ")}. Re-run the optimizer if that is not what you want.`
+        : `Exported ${rows.length - 1} students.`,
+    );
   }
 
   // ---------- render ----------
@@ -256,8 +307,8 @@ export function AllocationTab() {
               {assignment ? "Re-run optimizer" : "Run optimizer"}
             </Button>
           )}
-          <Button variant="secondary" onClick={save} disabled={!assignment}>
-            Save (encrypted)
+          <Button variant={dirty ? "primary" : "secondary"} onClick={save} disabled={!assignment}>
+            {dirty ? "Save changes (encrypted)" : "Save (encrypted)"}
           </Button>
           <Button variant="secondary" onClick={exportCsv} disabled={!assignment}>
             Export CSV
@@ -285,6 +336,27 @@ export function AllocationTab() {
             </ul>
           </div>
         )}
+        {unmatchedCodes.length > 0 && (
+          <div className="mt-2 rounded-md bg-amber-50 p-3 text-sm text-amber-900">
+            <p className="font-medium">
+              {unmatchedCodes.reduce((n, u) => n + u.codes.length, 0)} teammate share code
+              {unmatchedCodes.reduce((n, u) => n + u.codes.length, 0) === 1 ? "" : "s"} did not match anyone in this
+              session.
+            </p>
+            <p className="mt-1">
+              Usually a typo, or a code from a different session. Those preferences are ignored — everything else in
+              the response still counts.
+            </p>
+            <ul className="mt-2 list-disc pl-5">
+              {unmatchedCodes.slice(0, 10).map((u) => (
+                <li key={u.codeIndex}>
+                  #{u.codeIndex} entered {u.codes.map((c) => `"${c}"`).join(", ")}
+                </li>
+              ))}
+              {unmatchedCodes.length > 10 && <li>…and {unmatchedCodes.length - 10} more students.</li>}
+            </ul>
+          </div>
+        )}
         {teams.length === 0 && (
           <p className="mt-2 text-sm text-amber-700">Define projects first (or mark the session as generic).</p>
         )}
@@ -308,6 +380,7 @@ export function AllocationTab() {
           input={solverInput}
           assignment={assignment}
           evaluation={evaluation}
+          dirty={dirty}
           onChange={setAssignment}
         />
       )}

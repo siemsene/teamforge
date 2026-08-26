@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_FACTOR_PARAMS,
+  MIN_RATERS_FOR_DETAIL,
+  MIN_RATERS_TO_PUBLISH,
   MIN_RATERS_TO_TRIM,
   computeTeamFactors,
+  maxTeamSizeForNegativeSum,
+  scapegoatingIsNegativeSum,
   neutralShare,
   resolveFactorParams,
   shareToFactor,
@@ -466,5 +470,77 @@ describe("team mean", () => {
       expect(result.members.every((m) => m.factor === 1)).toBe(true);
     }
     expect(checked).toBeGreaterThan(30);
+  });
+});
+
+describe("scapegoating arithmetic", () => {
+  // The claim the settings panel makes: n-1 members agreeing to sink the last
+  // one gain less between them than that one loses. It holds while
+  // (n-1)*(ceiling-1) < (1-floor) — a statement about team size, not only about
+  // the caps, which is why the panel now names the size it is talking about.
+  const defaults = DEFAULT_FACTOR_PARAMS;
+
+  it("holds at the default caps for teams up to six", () => {
+    for (const n of [2, 3, 4, 5, 6]) {
+      expect(scapegoatingIsNegativeSum(n, defaults)).toBe(true);
+    }
+  });
+
+  it("fails at the default caps from seven upward", () => {
+    for (const n of [7, 8, 12]) {
+      expect(scapegoatingIsNegativeSum(n, defaults)).toBe(false);
+    }
+  });
+
+  it("reports the largest safe team size, and agrees with the predicate", () => {
+    const max = maxTeamSizeForNegativeSum(defaults);
+    expect(max).toBe(6);
+    expect(scapegoatingIsNegativeSum(max, defaults)).toBe(true);
+    expect(scapegoatingIsNegativeSum(max + 1, defaults)).toBe(false);
+  });
+
+  it("a tighter ceiling buys larger safe teams", () => {
+    const tight = { ...defaults, factorCeiling: 1.02 };
+    expect(maxTeamSizeForNegativeSum(tight)).toBeGreaterThan(maxTeamSizeForNegativeSum(defaults));
+    expect(scapegoatingIsNegativeSum(12, tight)).toBe(true);
+  });
+
+  it("a ceiling of exactly 1.00 makes every team size safe", () => {
+    const noGain = { ...defaults, factorCeiling: 1 };
+    expect(maxTeamSizeForNegativeSum(noGain)).toBe(Infinity);
+    expect(scapegoatingIsNegativeSum(50, noGain)).toBe(true);
+  });
+
+  it("the numbers behind the claim, worked through at five", () => {
+    // Four markers each reaching the ceiling gain 0.05; the target hits the
+    // floor and loses 0.30. The play costs the team 0.10 overall.
+    const gain = 4 * (defaults.factorCeiling - 1);
+    const loss = 1 - defaults.factorFloor;
+    expect(gain).toBeCloseTo(0.2, 10);
+    expect(loss).toBeCloseTo(0.3, 10);
+    expect(gain).toBeLessThan(loss);
+  });
+});
+
+describe("publication thresholds", () => {
+  it("a factor needs two real raters, per-share detail needs three", () => {
+    // A factor is an invertible function of the share, so one real ballot
+    // published as a factor *is* that ballot handed back to the student.
+    expect(MIN_RATERS_TO_PUBLISH).toBe(2);
+    expect(MIN_RATERS_FOR_DETAIL).toBe(3);
+    expect(MIN_RATERS_FOR_DETAIL).toBeGreaterThanOrEqual(MIN_RATERS_TO_PUBLISH);
+  });
+
+  it("shareToFactor is invertible outside the dead band, which is why", () => {
+    const p = DEFAULT_FACTOR_PARAMS;
+    // Below the ceiling, distinct shares give distinct factors...
+    expect(shareToFactor(1.1, p)).not.toBe(shareToFactor(1.15, p));
+    expect(shareToFactor(0.8, p)).not.toBe(shareToFactor(0.7, p));
+    // ...and the share reads straight back off the factor:
+    //   share = 1 + (f - 1) / k + deadband
+    const f = shareToFactor(1.1, p);
+    expect(1 + (f - 1) / p.damping + p.deadband).toBeCloseTo(1.1, 10);
+    const g = shareToFactor(0.8, p);
+    expect(1 - (1 - g) / p.damping - p.deadband).toBeCloseTo(0.8, 10);
   });
 });

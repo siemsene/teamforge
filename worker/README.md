@@ -60,7 +60,15 @@ npx wrangler deploy
 | `ALLOWED_ORIGINS`| —                 | Comma-separated origins allowed to call it (CORS + server-side). `ALLOWED_ORIGIN` singular still works. |
 | `MODEL`         | `claude-sonnet-5`  | Claude model used for feedback           |
 | `HOURLY_PER_IP` | `10`               | Max requests per IP per hour             |
-| `DAILY_CAP`     | `500`              | Global max requests per day              |
+| `DAILY_CAP`     | `120`              | Global max requests per day. This is the real spend control — see below. |
+
+### What the origin check is and isn't
+
+`ALLOWED_ORIGINS` is enforced in the CORS headers *and* server-side, so the two never contradict each other. But an `Origin` header is set by the caller: this stops other websites' **browsers** from spending your API key, and nothing else. Any script can send a matching one.
+
+So `DAILY_CAP` is the control that actually bounds spend, which is why its default is low enough that abusing it is not worth the trouble. Raise it deliberately, and keep it comfortably under what you are willing to pay for in a day.
+
+Both counters are read-then-write against Workers KV, which is neither atomic nor immediately consistent across regions, so a concurrent burst can overshoot a cap. Treat them as guards that bound the damage, not as exact meters.
 
 ## Local development
 

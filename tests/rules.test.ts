@@ -294,6 +294,41 @@ describe.skipIf(!emulatorHost)("firestore security rules", () => {
     await assertSucceeds(updateDoc(doc(student, "sessions/s1/teams/tok1"), { "nicknames.4": AES_ENV }));
   });
 
+  it("a first nickname may create the map on a team doc that has none", async () => {
+    // Teams provisioned before display names existed carry no nicknames field.
+    // Requiring one left those students with a permission error and, at the
+    // time, no way for their instructor to fix it.
+    await enableTeamMgmt("open");
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "sessions/s1/teams/tok1"), {
+        teamLabel: "Team 1",
+        createdAt: 1,
+        contract: EMPTY_CONTRACT,
+      });
+    });
+    const student = env.authenticatedContext("anonuser").firestore();
+    await assertSucceeds(updateDoc(doc(student, "sessions/s1/teams/tok1"), { "nicknames.3": AES_ENV }));
+    // Still one at a time thereafter.
+    await assertFails(
+      updateDoc(doc(student, "sessions/s1/teams/tok1"), { "nicknames.4": AES_ENV, "nicknames.5": AES_ENV }),
+    );
+  });
+
+  it("creating the map cannot be used to write several names at once", async () => {
+    await enableTeamMgmt("open");
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "sessions/s1/teams/tok1"), {
+        teamLabel: "Team 1",
+        createdAt: 1,
+        contract: EMPTY_CONTRACT,
+      });
+    });
+    const student = env.authenticatedContext("anonuser").firestore();
+    await assertFails(
+      updateDoc(doc(student, "sessions/s1/teams/tok1"), { nicknames: { "3": AES_ENV, "4": AES_ENV } }),
+    );
+  });
+
   it("a team member cannot rewrite several nicknames in one write", async () => {
     await enableTeamMgmt("open");
     const student = env.authenticatedContext("anonuser").firestore();
@@ -332,6 +367,14 @@ describe.skipIf(!emulatorHost)("firestore security rules", () => {
       });
     });
     await assertFails(updateDoc(doc(student, "sessions/s1/teams/tok1"), { "nicknames.3": AES_ENV }));
+  });
+
+  it("students cannot submit a peer evaluation when team management is disabled", async () => {
+    // The round-status check reads teamMgmt.rounds, so a session without the
+    // block at all has to be rejected outright rather than by evaluating into it.
+    const student = env.authenticatedContext("anonuser").firestore();
+    const sub = { submittedAt: 5, payload: VALID_PAYLOAD };
+    await assertFails(updateDoc(doc(student, "sessions/s1/students/hashA"), { peerEvalFormative: sub }));
   });
 
   it("students cannot update a contract when team management is disabled", async () => {

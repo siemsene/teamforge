@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { updateContract } from "../../lib/db";
+import { ContractConflictError, updateContract } from "../../lib/db";
 import { eciesEncrypt } from "../../lib/crypto";
 import { deriveTeamKey, openEnvelope, sealEnvelope } from "../../lib/memberKey";
 import { aiFeedbackConfigured, requestContractFeedback } from "../../lib/aiFeedback";
@@ -14,6 +14,14 @@ import type {
 import { Button, Card, ConfirmDialog, ErrorText, Spinner, TextArea } from "../../components/ui";
 import { ContractPrint } from "../teams/ContractPrint";
 import { contractPdfName, printAs } from "../../lib/printPdf";
+
+/** Turns the transaction's refusal into something a student can act on. */
+function conflictMessage(e: unknown): string {
+  if (e instanceof ContractConflictError) {
+    return "A teammate saved this contract while you were editing, so your version was not written — nothing of theirs was lost. Reload to see what they wrote, then re-apply your changes.";
+  }
+  return e instanceof Error ? e.message : String(e);
+}
 
 interface SectionState {
   id: string;
@@ -48,13 +56,19 @@ export function ContractEditor({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [info, setInfo] = useState("");
+  const [dirty, setDirty] = useState(false);
   const [confirmFinalize, setConfirmFinalize] = useState(false);
   const [confirmAi, setConfirmAi] = useState(false);
   const [printing, setPrinting] = useState<ContractContent | null>(null);
 
   const myCodeIndex = roster.codeIndex;
 
+  // Reload whenever the team doc changes — StudentHub keeps a live subscription
+  // on it — but never on top of unsaved typing. A teammate's save used to be
+  // invisible until a full page reload, which is what the stale banner was
+  // apologising for.
   useEffect(() => {
+    if (dirty) return;
     (async () => {
       try {
         const key = await deriveTeamKey(sid, roster.teamToken);
@@ -63,9 +77,11 @@ export function ContractEditor({
         if (team.contract.content) {
           content = JSON.parse(await openEnvelope(key, team.contract.content)) as ContractContent;
         }
-        if (team.contract.feedback) {
-          setFeedback(JSON.parse(await openEnvelope(key, team.contract.feedback)) as ContractFeedback);
-        }
+        setFeedback(
+          team.contract.feedback
+            ? (JSON.parse(await openEnvelope(key, team.contract.feedback)) as ContractFeedback)
+            : null,
+        );
         const byId = new Map((content?.sections ?? []).map((s) => [s.id, s.text]));
         setSections(
           tm.contractSections.map((def) => ({
@@ -75,6 +91,8 @@ export function ContractEditor({
             text: byId.get(def.id) ?? "",
           })),
         );
+        setStatus(team.contract.status);
+        setLoadedAt(team.contract.updatedAt);
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
       } finally {
@@ -82,9 +100,11 @@ export function ContractEditor({
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sid, team.tokenHash]);
+  }, [sid, team.tokenHash, team.contract.updatedAt, dirty]);
 
-  const stale = loadedAt !== team.contract.updatedAt;
+  // Only meaningful while there is unsaved typing: otherwise the effect above
+  // has already pulled the teammate's version in.
+  const stale = dirty && loadedAt !== team.contract.updatedAt;
   const finalized = status === "final";
 
   function buildContent(): ContractContent {
@@ -108,9 +128,12 @@ export function ContractEditor({
       feedbackAt: nextFeedback ? now : team.contract.feedbackAt,
       finalizedAt: nextStatus === "final" ? now : nextStatus === "draft" ? null : team.contract.finalizedAt,
     };
-    await updateContract(sid, team.tokenHash, next);
+    // The transaction refuses the write if a teammate saved since we loaded,
+    // so their work cannot be silently overwritten by ours.
+    await updateContract(sid, team.tokenHash, next, loadedAt);
     setStatus(nextStatus);
     setLoadedAt(now);
+    setDirty(false);
     await onSaved();
   }
 
@@ -122,7 +145,7 @@ export function ContractEditor({
       await persist("draft", feedback);
       setInfo("Draft saved. Your teammates can see it when they open this page.");
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(conflictMessage(e));
     } finally {
       setBusy(false);
     }
@@ -142,7 +165,7 @@ export function ContractEditor({
       await persist("draft", fb);
       setInfo("AI feedback received. Revise your contract, then finalize when the team agrees.");
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(conflictMessage(e));
     } finally {
       setBusy(false);
     }
@@ -156,7 +179,7 @@ export function ContractEditor({
       await persist("final", feedback);
       setInfo("Contract finalized. Every member can now download the PDF.");
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(conflictMessage(e));
     } finally {
       setBusy(false);
     }
@@ -168,7 +191,7 @@ export function ContractEditor({
       await persist("draft", feedback);
       setInfo("Reopened for editing.");
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(conflictMessage(e));
     } finally {
       setBusy(false);
     }
@@ -188,14 +211,15 @@ export function ContractEditor({
         </span>
       </div>
       <p className="mb-3 text-sm text-slate-600">
-        Any team member can edit this. Write your team's norms for each area below. Do not include anyone's full name
-        if you plan to request AI feedback.
+        Any team member can edit this. Write your team&rsquo;s norms for each area below. Your instructor can read it
+        from the moment you first save &mdash; drafts included &mdash; so nothing here is private to the team. Do not
+        include anyone&rsquo;s full name if you plan to request AI feedback.
       </p>
 
       {stale && (
-        <p className="mb-3 rounded-md bg-amber-50 p-2 text-sm text-amber-800">
-          A teammate saved a newer version after you opened this page. Saving now will overwrite it — reload to see
-          their changes first.
+        <p className="mb-3 rounded-md border border-amber-200 bg-amber-50 p-2 text-sm text-amber-900">
+          A teammate saved a newer version while you were typing. Your unsaved edits are still here, but saving them
+          would replace what they wrote — copy anything you need, then reload to start from their version.
         </p>
       )}
 
@@ -208,9 +232,10 @@ export function ContractEditor({
               rows={3}
               value={s.text}
               disabled={finalized || busy}
-              onChange={(e) =>
-                setSections((prev) => prev.map((p, j) => (j === i ? { ...p, text: e.target.value } : p)))
-              }
+              onChange={(e) => {
+                setDirty(true);
+                setSections((prev) => prev.map((p, j) => (j === i ? { ...p, text: e.target.value } : p)));
+              }}
             />
             {feedbackById.get(s.id) && (
               <div className="mt-1 rounded-md bg-indigo-50 p-2 text-xs text-indigo-900">
@@ -303,7 +328,8 @@ export function ContractEditor({
         onConfirm={finalize}
       >
         <p>
-          Finalizing marks the contract as agreed and shares it with your instructor. You can reopen it for edits
+          Finalizing records that your team has agreed this contract, and every member can then save it as a PDF. Your
+          instructor can already read it, drafts included &mdash; this marks it as settled. You can reopen it for edits
           later if needed.
         </p>
       </ConfirmDialog>

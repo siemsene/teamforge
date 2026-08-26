@@ -94,6 +94,8 @@ function NewSessionForm({ onDone }: { onDone: () => void }) {
     codesCsv: string;
     recoveryFilename: string;
     recoveryText: string;
+    /** Set when the writes failed after the keys and codes were generated. */
+    incomplete?: string;
   } | null>(null);
   const [title, setTitle] = useState("");
   const [numStudents, setNumStudents] = useState(30);
@@ -170,10 +172,10 @@ function NewSessionForm({ onDone }: { onDone: () => void }) {
         privacyNote: DEFAULT_PRIVACY_NOTE,
       };
 
-      await createSession(sid, session, publicConfig, roster);
-
-      // One-time downloads: login codes + recovery key. Codes are never stored
-      // server-side (only their hashes), so this is the only copy.
+      // Build the two one-time files *before* writing anything. The codes exist
+      // only in this variable — Firestore keeps nothing but their hashes — so a
+      // write that failed halfway used to leave a half-created session whose
+      // codes had never reached anybody, with no way to recover them.
       const link = surveyUrl(sid);
       const codesFilename = sessionFilename(title.trim(), sid, "student-codes.csv");
       const codesCsv = toCsv([
@@ -192,6 +194,17 @@ function NewSessionForm({ onDone }: { onDone: () => void }) {
         recoveryFilename,
         recoveryText,
       };
+
+      try {
+        await createSession(sid, session, publicConfig, roster);
+      } catch (err) {
+        // Hand the files over regardless: the session may be partly written, and
+        // the instructor needs the recovery key to reach whatever did land.
+        setCreatedBundle({ ...bundle, incomplete: err instanceof Error ? err.message : String(err) });
+        downloadCreatedFiles(bundle);
+        return;
+      }
+
       downloadCreatedFiles(bundle);
       setCreatedBundle(bundle);
     } catch (err) {
@@ -206,13 +219,25 @@ function NewSessionForm({ onDone }: { onDone: () => void }) {
       <h2 className="mb-3 font-semibold">New session</h2>
       {createdBundle ? (
         <div className="space-y-3">
-          <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
-            <p className="font-medium">Session created: {createdBundle.title}</p>
-            <p className="mt-1">
-              Save both files now. Login codes are not stored in plaintext and cannot be recovered after leaving this
-              screen.
-            </p>
-          </div>
+          {createdBundle.incomplete ? (
+            <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+              <p className="font-medium">Session only partly created: {createdBundle.title}</p>
+              <p className="mt-1">Saving it failed: {createdBundle.incomplete}</p>
+              <p className="mt-1">
+                <strong>Save both files anyway.</strong> They hold the only copy of the login codes and the recovery
+                key, and without them nothing that did get written can be reached. Then open the session, check the
+                student count on its Overview tab, and delete and recreate it if that number is wrong.
+              </p>
+            </div>
+          ) : (
+            <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
+              <p className="font-medium">Session created: {createdBundle.title}</p>
+              <p className="mt-1">
+                Save both files now. Login codes are not stored in plaintext and cannot be recovered after leaving this
+                screen.
+              </p>
+            </div>
+          )}
           <div className="grid gap-2 text-sm sm:grid-cols-2">
             <div className="rounded-md border border-slate-200 p-3">
               <p className="font-medium">Student codes CSV</p>
@@ -236,7 +261,7 @@ function NewSessionForm({ onDone }: { onDone: () => void }) {
                 navigate(`/session/${createdBundle.sid}`);
               }}
             >
-              I saved both files
+              {createdBundle.incomplete ? "I saved both files — open the session" : "I saved both files"}
             </Button>
           </div>
         </div>

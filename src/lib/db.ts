@@ -20,6 +20,7 @@ import {
   updateDoc,
   where,
   writeBatch,
+  runTransaction,
   type FirestoreError,
   type Unsubscribe,
   type WriteBatch,
@@ -273,20 +274,32 @@ export async function saveTeamMgmt(
   await batch.commit();
 }
 
-/** Provisioning: per-student encrypted roster blobs + team docs, chunked. */
+/**
+ * Provisioning: per-student encrypted roster blobs + team docs, chunked.
+ *
+ * A team marked `reused` already has a document holding its contract and its
+ * members' chosen display names. Only the label is refreshed there — a plain
+ * `set` would overwrite the team's work, which is what made re-uploading a
+ * roster destructive. New teams are written whole, and teams that no longer
+ * exist are deleted so the Teams tab does not list two generations at once.
+ */
 export async function provisionRoster(
   sid: string,
   studentPatches: { hash: string; roster: AesEnvelope }[],
-  teamDocs: { tokenHash: string; team: TeamDoc }[],
+  teamDocs: { tokenHash: string; team: TeamDoc; reused: boolean }[],
+  staleTokenHashes: string[] = [],
   onProgress?: (done: number, total: number) => void,
 ): Promise<void> {
   const writes: ((b: WriteBatch) => void)[] = [
     ...studentPatches.map(
       (p) => (b: WriteBatch) => b.update(doc(db, "sessions", sid, "students", p.hash), { roster: p.roster }),
     ),
-    ...teamDocs.map(
-      (t) => (b: WriteBatch) => b.set(doc(db, "sessions", sid, "teams", t.tokenHash), t.team),
-    ),
+    ...teamDocs.map((t) => (b: WriteBatch) => {
+      const ref = doc(db, "sessions", sid, "teams", t.tokenHash);
+      if (t.reused) b.update(ref, { teamLabel: t.team.teamLabel });
+      else b.set(ref, t.team);
+    }),
+    ...staleTokenHashes.map((h) => (b: WriteBatch) => b.delete(doc(db, "sessions", sid, "teams", h))),
   ];
   for (let i = 0; i < writes.length; i += 450) {
     const batch = writeBatch(db);
@@ -305,6 +318,20 @@ export async function getTeamDirectoryDoc(sid: string): Promise<{ payload: Ecies
   return snap.exists() ? (snap.data() as { payload: EciesPayload }) : null;
 }
 
+/** Live view of one team doc, for a student who holds its token. */
+export function watchTeam(
+  sid: string,
+  tokenHash: string,
+  cb: (t: TeamDoc | null) => void,
+  onError?: (err: FirestoreError) => void,
+): Unsubscribe {
+  return onSnapshot(
+    doc(db, "sessions", sid, "teams", tokenHash),
+    (snap) => cb(snap.exists() ? (snap.data() as TeamDoc) : null),
+    onError,
+  );
+}
+
 export function watchTeams(sid: string, cb: (rows: (TeamDoc & { tokenHash: string })[]) => void): Unsubscribe {
   return onSnapshot(collection(db, "sessions", sid, "teams"), (snap) => {
     const rows = snap.docs.map((d) => ({ tokenHash: d.id, ...(d.data() as TeamDoc) }));
@@ -319,8 +346,35 @@ export async function getTeamByTokenHash(sid: string, tokenHash: string): Promis
   return snap.exists() ? (snap.data() as TeamDoc) : null;
 }
 
-export async function updateContract(sid: string, tokenHash: string, contract: ContractState): Promise<void> {
-  await updateDoc(doc(db, "sessions", sid, "teams", tokenHash), { contract });
+/** Raised when a teammate saved between this editor loading and saving. */
+export class ContractConflictError extends Error {
+  constructor(readonly serverUpdatedAt: number | null) {
+    super("A teammate saved a newer version of this contract.");
+    this.name = "ContractConflictError";
+  }
+}
+
+/**
+ * Writes the contract only if nobody else has since `expectedUpdatedAt`.
+ *
+ * Any member may edit, so two people typing at once is ordinary rather than
+ * exceptional. A plain update is last-write-wins and loses the other person's
+ * work without either of them noticing, so the check happens inside a
+ * transaction where it can actually hold.
+ */
+export async function updateContract(
+  sid: string,
+  tokenHash: string,
+  contract: ContractState,
+  expectedUpdatedAt: number | null,
+): Promise<void> {
+  const ref = doc(db, "sessions", sid, "teams", tokenHash);
+  await runTransaction(db, async (tx) => {
+    const snap = await tx.get(ref);
+    const current = (snap.data() as TeamDoc | undefined)?.contract?.updatedAt ?? null;
+    if (current !== expectedUpdatedAt) throw new ContractConflictError(current);
+    tx.update(ref, { contract });
+  });
 }
 
 /** Write one student's chosen display name. Uses a nested field path so the
@@ -383,14 +437,42 @@ async function deleteCollectionDocs(sid: string, sub: string): Promise<number> {
   return snap.docs.length;
 }
 
+/** Deletes a document that may legitimately not exist, distinguishing "there
+ * was nothing there" from "the delete failed". Erasure is a promise the app
+ * makes out loud, so a failure must not be reported as a completed purge. */
+async function deleteIfPresent(path: string[], failures: string[]): Promise<void> {
+  try {
+    await deleteDoc(doc(db, ...(path as [string, ...string[]])));
+  } catch (e) {
+    failures.push(`${path.join("/")}: ${e instanceof Error ? e.message : String(e)}`);
+  }
+}
+
+export interface PurgeResult {
+  /** Student documents removed. */
+  students: number;
+  /** Empty when everything was erased; otherwise what could not be deleted. */
+  failures: string[];
+}
+
 /** Removes every student response, the allocation, and all team-management
  * data (contracts, team directory). Keeps the session shell. */
-export async function purgeStudentData(sid: string): Promise<number> {
-  const n = await deleteCollectionDocs(sid, "students");
-  await deleteCollectionDocs(sid, "teams");
-  await deleteDoc(doc(db, "sessions", sid, "results", "allocation")).catch(() => {});
-  await deleteDoc(doc(db, "sessions", sid, "results", "teamDirectory")).catch(() => {});
-  return n;
+export async function purgeStudentData(sid: string): Promise<PurgeResult> {
+  const failures: string[] = [];
+  let students = 0;
+  try {
+    students = await deleteCollectionDocs(sid, "students");
+  } catch (e) {
+    failures.push(`students: ${e instanceof Error ? e.message : String(e)}`);
+  }
+  try {
+    await deleteCollectionDocs(sid, "teams");
+  } catch (e) {
+    failures.push(`teams: ${e instanceof Error ? e.message : String(e)}`);
+  }
+  await deleteIfPresent(["sessions", sid, "results", "allocation"], failures);
+  await deleteIfPresent(["sessions", sid, "results", "teamDirectory"], failures);
+  return { students, failures };
 }
 
 /** Deletes the entire session including all subcollections. */
@@ -402,6 +484,10 @@ export async function deleteSessionCompletely(sid: string): Promise<void> {
   // The "public" subcollection only ever holds the single "config" doc, and the
   // rules grant get/write on it but not list — so delete it directly rather than
   // via a (forbidden) collection query.
-  await deleteDoc(doc(db, "sessions", sid, "public", "config")).catch(() => {});
+  const failures: string[] = [];
+  await deleteIfPresent(["sessions", sid, "public", "config"], failures);
   await deleteDoc(doc(db, "sessions", sid));
+  if (failures.length > 0) {
+    throw new Error(`The session was deleted, but some data could not be removed: ${failures.join("; ")}`);
+  }
 }

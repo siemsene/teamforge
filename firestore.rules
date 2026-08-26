@@ -100,15 +100,21 @@ service cloud.firestore {
     }
 
     // A student may write exactly one round's submission, only while that round
-    // is open. roster/result*/codeIndex stay owner-only.
+    // is open, and only on a session that runs team management at all.
+    // roster/result*/codeIndex stay owner-only.
+    //
+    // The contents cannot be checked here — the payload is encrypted to the
+    // instructor — so a ballot is re-validated after decryption on the Peer
+    // evals tab (see lib/evalValidation.ts, validateSubmittedBallot).
     function isValidPeerEvalUpdate(sid) {
       let keys = request.resource.data.diff(resource.data).affectedKeys();
-      return (keys.hasOnly(["peerEvalFormative"])
+      return teamMgmtOn(sid)
+          && ((keys.hasOnly(["peerEvalFormative"])
               && roundOpen(sid, "formative")
               && isPeerEvalSubmission(request.resource.data.peerEvalFormative))
           || (keys.hasOnly(["peerEvalSummative"])
               && roundOpen(sid, "summative")
-              && isPeerEvalSubmission(request.resource.data.peerEvalSummative));
+              && isPeerEvalSubmission(request.resource.data.peerEvalSummative)));
     }
 
     // Team members may update only the contract field, with the expected shape.
@@ -137,14 +143,21 @@ service cloud.firestore {
     // one-key-at-a-time stops a single write from rewriting the whole team's
     // names, and the cap bounds growth. Values stay opaque ciphertext; a
     // garbage entry only fails to decrypt and falls back to the code index.
+    //
+    // Teams provisioned before display names existed carry no nicknames field at
+    // all. Requiring one stranded those students with a permission error and no
+    // way out, so the first write may create the map — with exactly one entry,
+    // which is the same one-key-at-a-time bound applied to an empty starting
+    // point.
     function isValidNicknameUpdate() {
       return request.resource.data.diff(resource.data).affectedKeys().hasOnly(["nicknames"])
-        && ("nicknames" in resource.data)
         && request.resource.data.nicknames is map
         && request.resource.data.nicknames.size() <= 60
-        && request.resource.data.nicknames
-             .diff(resource.data.nicknames)
-             .affectedKeys().size() == 1;
+        && (("nicknames" in resource.data)
+              ? request.resource.data.nicknames
+                  .diff(resource.data.nicknames)
+                  .affectedKeys().size() == 1
+              : request.resource.data.nicknames.size() == 1);
     }
 
     match /users/{uid} {

@@ -8,6 +8,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import {
   dayKey,
   hourKey,
+  secondsUntilNextDay,
   secondsUntilNextHour,
   validateFeedbackRequest,
   type FeedbackRequest,
@@ -16,7 +17,10 @@ import {
 export interface Env {
   ANTHROPIC_API_KEY: string;
   RATE_KV: KVNamespace;
-  /** Comma-separated list of origins allowed to call this worker. */
+  /**
+   * Comma-separated list of origins allowed to call this worker. Stops other
+   * websites' browsers, not scripts — see the check in fetch() below.
+   */
   ALLOWED_ORIGINS?: string;
   /** Legacy single-origin form, still honoured. */
   ALLOWED_ORIGIN?: string;
@@ -105,9 +109,18 @@ function json(
   });
 }
 
+/**
+ * Hourly-per-IP and global-daily counters.
+ *
+ * Read-then-write against KV, which is neither atomic nor immediately
+ * consistent across regions, so concurrent bursts can overshoot a cap. That is
+ * tolerable for a spend guard whose job is to bound the damage rather than to
+ * meter exactly — but do not read these numbers as hard limits. Keep DAILY_CAP
+ * comfortably below what you are willing to pay for in a day.
+ */
 async function checkAndBumpLimits(env: Env, ip: string, now: Date): Promise<{ ok: boolean; retryAfter?: number }> {
   const hourlyCap = Number(env.HOURLY_PER_IP ?? "10");
-  const dailyCap = Number(env.DAILY_CAP ?? "500");
+  const dailyCap = Number(env.DAILY_CAP ?? "120");
 
   const hKey = hourKey(ip, now);
   const dKey = dayKey(now);
@@ -115,7 +128,12 @@ async function checkAndBumpLimits(env: Env, ip: string, now: Date): Promise<{ ok
   const hCount = Number(hRaw ?? "0");
   const dCount = Number(dRaw ?? "0");
 
-  if (hCount >= hourlyCap || dCount >= dailyCap) {
+  if (dCount >= dailyCap) {
+    // The daily window does not reopen at the top of the hour, so saying so
+    // would send everyone back for nothing, over and over.
+    return { ok: false, retryAfter: secondsUntilNextDay(now) };
+  }
+  if (hCount >= hourlyCap) {
     return { ok: false, retryAfter: secondsUntilNextHour(now) };
   }
   // Bump both counters with TTLs that outlast their window.
@@ -167,9 +185,14 @@ export default {
       return json({ error: "Not found." }, 404, env, origin);
     }
 
-    // CORS headers only constrain browsers; also enforce the origin server-side
-    // so scripts can't spend the API key. The app always sends Origin on this
-    // cross-origin POST, so requiring a listed match rejects direct clients.
+    // Enforce the origin server-side as well as in the CORS headers, so the
+    // two never contradict each other.
+    //
+    // Be clear about what this is worth: an Origin header is set by the caller,
+    // so this stops *browsers* on other sites, and nothing else. Any script can
+    // send a matching one. The real control on API-key spend is DAILY_CAP
+    // below, which is why it is set low enough that abuse is not worth the
+    // trouble rather than high enough to never inconvenience anyone.
     if (!isAllowedOrigin(env, origin)) {
       return json({ error: "Forbidden origin." }, 403, env, origin);
     }

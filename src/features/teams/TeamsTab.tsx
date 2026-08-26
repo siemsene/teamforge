@@ -23,6 +23,7 @@ const STATUS_LABEL = { empty: "Not started", draft: "In progress", final: "Final
 export function TeamsTab() {
   const { sid, session } = useSession();
   const [teams, setTeams] = useState<(TeamDoc & { tokenHash: string })[]>([]);
+  const [reuploading, setReuploading] = useState(false);
   useEffect(() => watchTeams(sid, setTeams), [sid]);
 
   const provisioned = session.teamMgmt?.rosterUploadedAt != null;
@@ -48,13 +49,25 @@ export function TeamsTab() {
   return (
     <div className="space-y-4">
       <Card>
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="font-semibold">Team contracts</h2>
-            <p className="text-sm text-slate-600">{teams.length} teams provisioned.</p>
+            <p className="text-sm text-slate-600">
+              {teams.length} teams provisioned
+              {session.teamMgmt?.rosterUploadedAt != null &&
+                ` on ${new Date(session.teamMgmt.rosterUploadedAt).toLocaleDateString()}`}
+              .
+            </p>
           </div>
+          {/* Teams change: a student enrols late, or you move somebody by hand.
+              Re-uploading keeps each unchanged team's contract and display
+              names, so this is no longer a one-shot decision. */}
+          <Button variant="secondary" onClick={() => setReuploading((v) => !v)}>
+            {reuploading ? "Cancel" : "Change teams / re-upload roster"}
+          </Button>
         </div>
       </Card>
+      {reuploading && <RosterImport existingConfig={session.teamMgmt} onDone={() => setReuploading(false)} />}
       <ContractEmailCard />
       <ContractReview teams={teams} sid={sid} sessionTitle={session.title} publicKey={session.wrappedKeys} />
     </div>

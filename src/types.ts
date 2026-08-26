@@ -274,12 +274,18 @@ export interface EvalResultView {
   /** Points one teammate allocates to you at an even split: 100 / (n − 1). */
   neutralShare: number;
   /** Trimmed mean of the shares received, where 1.00 is an even split.
-   * null when raterCount < 3 (anonymity guard — factor only). */
+   * null when raterCount < MIN_RATERS_FOR_DETAIL (anonymity guard). */
   share?: number | null;
   /** Legacy: pre-dead-band results stored the same figure in points.
    * Retained so results published before the redesign still render. */
   adjustedMeanPoints?: number | null;
+  /** The factor as shown to the student. Held at 1.00 when `factorWithheld`,
+   * so the number carries nothing about the single ballot behind it. */
   factor: number;
+  /** True when too few teammates rated this student for a factor to be
+   * returned without revealing what one of them said. The instructor's own
+   * table and CSV exports still carry the computed value. */
+  factorWithheld?: boolean;
   behaviorAverages?: number[];
   /** Behaviour labels as they stood when this result was published, so later
    * edits to the list cannot silently re-label results already sent out. */

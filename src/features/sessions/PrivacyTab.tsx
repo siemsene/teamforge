@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useSession } from "./SessionContext";
-import { deleteSessionCompletely, purgeStudentData } from "../../lib/db";
+import { deleteSessionCompletely, purgeStudentData, saveTeamMgmt } from "../../lib/db";
+import { publicTeamMgmt } from "../teams/contractTemplate";
 import { Button, Card, ConfirmDialog, ErrorText } from "../../components/ui";
 
 export function PrivacyTab() {
@@ -19,9 +20,27 @@ export function PrivacyTab() {
     setError("");
     setMessage("");
     try {
-      const n = await purgeStudentData(sid);
-      setMessage(`Deleted ${n} student records, the saved allocation, and any team contracts and evaluations.`);
+      const { students: n, failures } = await purgeStudentData(sid);
+      // The team docs are gone, so the roster no longer describes anything.
+      // Clearing the timestamp returns the Teams tab to its upload screen
+      // rather than leaving it reporting "0 teams provisioned".
+      if (session.teamMgmt?.rosterUploadedAt != null) {
+        const next = { ...session.teamMgmt, rosterUploadedAt: null };
+        await saveTeamMgmt(sid, next, publicTeamMgmt(next)).catch((e) =>
+          failures.push(`team-management config: ${errMsg(e)}`),
+        );
+      }
       setConfirmPurge(false);
+      if (failures.length > 0) {
+        // Erasure is promised in plain words to students and instructors alike,
+        // so a partial one is reported as a partial one.
+        setError(
+          `Purge incomplete — ${n} student record${n === 1 ? "" : "s"} deleted, but some data could not be removed: ` +
+            `${failures.join("; ")}. Try again; anything already deleted stays deleted.`,
+        );
+        return;
+      }
+      setMessage(`Deleted ${n} student records, the saved allocation, and any team contracts and evaluations.`);
     } catch (e) {
       setError(`Could not purge student data: ${errMsg(e)}`);
     } finally {

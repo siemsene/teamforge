@@ -125,6 +125,27 @@ function LandingPage() {
   );
 }
 
+/** A mistyped survey link is the likeliest way to land here, so say so rather
+ * than leaving the header floating over an empty page. */
+function NotFoundPage() {
+  return (
+    <div className="mx-auto max-w-xl px-4 py-16">
+      <Card>
+        <h1 className="mb-2 text-xl font-bold">Page not found</h1>
+        <p className="text-sm text-slate-600">
+          There is nothing at this address. If you are a student, check the survey link your instructor sent you — it
+          looks like <code className="rounded bg-slate-100 px-1 text-xs">/s/…</code> followed by a session id.
+        </p>
+        <p className="mt-3">
+          <Link className="text-indigo-600 hover:underline" to="/">
+            Go to the home page
+          </Link>
+        </p>
+      </Card>
+    </div>
+  );
+}
+
 function HomeRoute() {
   const { isAdmin } = useAuth();
   // The admin's default view is the approval panel, not the marketing landing.
@@ -157,6 +178,7 @@ export default function App() {
           }
         />
         <Route path="/s/:sid" element={<StudentPage />} />
+        <Route path="*" element={<NotFoundPage />} />
       </Routes>
     </div>
   );

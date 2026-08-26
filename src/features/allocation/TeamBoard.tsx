@@ -1,8 +1,17 @@
 import { useMemo } from "react";
-import { DndContext, PointerSensor, useDraggable, useDroppable, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
+import {
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  useDraggable,
+  useDroppable,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
 import type { Evaluation, ViolationDetail } from "../../solver/evaluate";
 import type { SolverInput, SolverStudent } from "../../solver/types";
-import { Badge, Card } from "../../components/ui";
+import { Badge, Card, Select } from "../../components/ui";
 
 const UNASSIGNED = "__unassigned__";
 
@@ -12,23 +21,31 @@ export function TeamBoard({
   input,
   assignment,
   evaluation,
+  dirty,
   onChange,
 }: {
   input: SolverInput;
   assignment: Record<string, string[]>;
   evaluation: Evaluation;
+  /** True when the board differs from the allocation last saved. */
+  dirty?: boolean;
   onChange: (a: Record<string, string[]>) => void;
 }) {
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
+  // KeyboardSensor alongside PointerSensor: this board is the instructor's tool
+  // for the last mile of allocation, and drag-only made it unusable without a
+  // mouse. Space picks a student up, arrow keys move between teams, Space drops
+  // them. The menu on each chip covers the same ground for anyone who would
+  // rather not drag at all.
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(KeyboardSensor),
+  );
   const byHash = useMemo(() => new Map(input.students.map((s) => [s.hash, s])), [input.students]);
 
   const assigned = new Set(Object.values(assignment).flat());
   const unassigned = input.students.filter((s) => !assigned.has(s.hash)).map((s) => s.hash);
 
-  function handleDragEnd(e: DragEndEvent) {
-    const studentHash = String(e.active.id);
-    const target = e.over ? String(e.over.id) : null;
-    if (!target) return;
+  function move(studentHash: string, target: string) {
     const next: Record<string, string[]> = {};
     for (const t of input.teams) next[t.id] = (assignment[t.id] ?? []).filter((h) => h !== studentHash);
     if (target !== UNASSIGNED) {
@@ -36,6 +53,12 @@ export function TeamBoard({
       next[target] = [...next[target], studentHash];
     }
     onChange(next);
+  }
+
+  function handleDragEnd(e: DragEndEvent) {
+    const target = e.over ? String(e.over.id) : null;
+    if (!target) return;
+    move(String(e.active.id), target);
   }
 
   const severityCounts = countBySeverity(evaluation.details);
@@ -46,10 +69,17 @@ export function TeamBoard({
         <div className="flex flex-wrap items-center gap-3 text-sm">
           <span className="font-semibold">Total penalty: {round1(evaluation.totalPenalty)}</span>
           <SeveritySummary counts={severityCounts} />
+          {dirty && <Badge tone="amber">unsaved changes</Badge>}
           <span className="ml-auto text-xs text-slate-500">
-            Drag students between teams — violations update live.
+            Drag students between teams, or use the menu beside one — violations update live.
           </span>
         </div>
+        {dirty && (
+          <p className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs text-amber-900">
+            These moves exist only in this browser tab. Press <strong>Save (encrypted)</strong> above — the Teams tab
+            builds its roster from the <em>saved</em> allocation, so an unsaved move here would never reach students.
+          </p>
+        )}
         {(evaluation.byTeam[""] ?? []).map((d, i) => (
           <p key={i} className="mt-1 text-sm text-red-600">
             {d.label}
@@ -67,16 +97,18 @@ export function TeamBoard({
             members={(assignment[team.id] ?? []).map((h) => byHash.get(h)).filter((s): s is SolverStudent => !!s)}
             violations={evaluation.byTeam[team.id] ?? []}
             input={input}
+            onMove={move}
           />
         ))}
         {unassigned.length > 0 && (
           <TeamCard
             id={UNASSIGNED}
             title="Unassigned"
-            subtitle="Drag students onto a team"
+            subtitle="Move each onto a team"
             members={unassigned.map((h) => byHash.get(h)).filter((s): s is SolverStudent => !!s)}
             violations={[]}
             input={input}
+            onMove={move}
             danger
           />
         )}
@@ -92,6 +124,7 @@ function TeamCard({
   members,
   violations,
   input,
+  onMove,
   danger,
 }: {
   id: string;
@@ -100,6 +133,7 @@ function TeamCard({
   members: SolverStudent[];
   violations: ViolationDetail[];
   input: SolverInput;
+  onMove: (studentHash: string, target: string) => void;
   danger?: boolean;
 }) {
   const { isOver, setNodeRef } = useDroppable({ id });
@@ -122,7 +156,7 @@ function TeamCard({
       </div>
       <div className="mb-2 flex min-h-10 flex-wrap gap-1.5">
         {members.map((s) => (
-          <StudentChip key={s.hash} student={s} input={input} />
+          <StudentChip key={s.hash} student={s} input={input} currentTeamId={id} onMove={onMove} />
         ))}
         {members.length === 0 && <span className="text-xs text-slate-400">empty</span>}
       </div>
@@ -140,7 +174,17 @@ function TeamCard({
   );
 }
 
-function StudentChip({ student, input }: { student: SolverStudent; input: SolverInput }) {
+function StudentChip({
+  student,
+  input,
+  currentTeamId,
+  onMove,
+}: {
+  student: SolverStudent;
+  input: SolverInput;
+  currentTeamId: string;
+  onMove: (studentHash: string, target: string) => void;
+}) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: student.hash });
   const summary = useMemo(() => {
     const parts: string[] = [];
@@ -153,17 +197,36 @@ function StudentChip({ student, input }: { student: SolverStudent; input: Solver
   }, [student, input.questions]);
 
   return (
-    <span
-      ref={setNodeRef}
-      {...listeners}
-      {...attributes}
-      title={summary}
-      style={transform ? { transform: `translate(${transform.x}px, ${transform.y}px)` } : undefined}
-      className={`cursor-grab touch-none select-none rounded-md px-2 py-1 text-xs font-medium ${
-        isDragging ? "z-10 bg-indigo-600 text-white shadow-lg" : student.submitted ? "bg-indigo-100 text-indigo-800" : "bg-slate-200 text-slate-500"
-      }`}
-    >
-      #{student.codeIndex}
+    <span className="inline-flex items-stretch">
+      <span
+        ref={setNodeRef}
+        {...listeners}
+        {...attributes}
+        title={summary}
+        aria-label={`Student #${student.codeIndex}`}
+        aria-roledescription="draggable student"
+        style={transform ? { transform: `translate(${transform.x}px, ${transform.y}px)` } : undefined}
+        className={`cursor-grab touch-none select-none rounded-l-md px-2 py-1 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
+          isDragging ? "z-10 bg-indigo-600 text-white shadow-lg" : student.submitted ? "bg-indigo-100 text-indigo-800" : "bg-slate-200 text-slate-500"
+        }`}
+      >
+        #{student.codeIndex}
+      </span>
+      {/* The same move without the drag. Cheap to offer, and the only route for
+          anyone on a screen reader or a device where dragging is awkward. */}
+      <Select
+        aria-label={`Move student #${student.codeIndex} to another team`}
+        value={currentTeamId}
+        onChange={(e) => onMove(student.hash, e.target.value)}
+        className="rounded-l-none border-l-0 px-1 py-0 text-xs"
+      >
+        {input.teams.map((t) => (
+          <option key={t.id} value={t.id}>
+            {t.name}
+          </option>
+        ))}
+        <option value={UNASSIGNED}>Unassigned</option>
+      </Select>
     </span>
   );
 }

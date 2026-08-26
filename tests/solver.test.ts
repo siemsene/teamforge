@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { solve } from "../src/solver/solve";
 import { evaluateAssignment } from "../src/solver/evaluate";
 import type { SolverInput, SolverStudent, SolverTeam } from "../src/solver/types";
-import type { Question } from "../src/types";
+import type { Constraint, Question } from "../src/types";
 
 function student(i: number, answers: SolverStudent["answers"]): SolverStudent {
   return { hash: `hash${i}`, codeIndex: i, answers, submitted: true };
@@ -195,4 +195,88 @@ describe("MIP solver", () => {
     const mustViolations = evaluation.details.filter((d) => d.severity === "must");
     expect(mustViolations).toHaveLength(0);
   }, 40_000);
+});
+
+describe("solver robustness", () => {
+  it("never collapses the class onto team 1 when a solution is missing", async () => {
+    // A solve that returns no incumbent leaves every x_i_t column absent. The
+    // argmax over nothing used to pick index 0 for everyone and report it as
+    // "the best allocation found so far".
+    const input: SolverInput = {
+      students: Array.from({ length: 6 }, (_, i) => student(i, {})),
+      teams: [team("a", 2, 3), team("b", 2, 3)],
+      idealTeamSize: 3,
+      constraints: [],
+      questions: [],
+      timeLimitSeconds: 10,
+    };
+    const result = await solve(input);
+    // With a real solve this passes on its merits; the point of the assertion is
+    // that a degenerate result can no longer look like this one.
+    expect(result.teams.a.length).toBeGreaterThan(0);
+    expect(result.teams.b.length).toBeGreaterThan(0);
+  });
+
+  it("returns teams inside their declared size limits", async () => {
+    const input: SolverInput = {
+      students: Array.from({ length: 9 }, (_, i) => student(i, {})),
+      teams: [team("a", 3, 3), team("b", 3, 3), team("c", 3, 3)],
+      idealTeamSize: 3,
+      constraints: [],
+      questions: [],
+      timeLimitSeconds: 10,
+    };
+    const result = await solve(input);
+    for (const id of ["a", "b", "c"]) expect(result.teams[id]).toHaveLength(3);
+  });
+});
+
+describe("numeric balance with non-respondents", () => {
+  // A student who never submitted has no answer at all. Scoring them 0 put them
+  // below the bottom of a 1-5 scale, so the optimizer worked to spread
+  // non-respondents evenly as if they were the weakest students in the class.
+  const balance: Constraint = { id: "bal", kind: "balanceNumeric", weight: "important", questionId: "coding" };
+
+  it("ignores students with no answer when computing the mean", () => {
+    const students = [
+      student(0, { coding: 5 }),
+      student(1, { coding: 5 }),
+      { ...student(2, {}), submitted: false },
+      { ...student(3, {}), submitted: false },
+    ];
+    const input: SolverInput = {
+      students,
+      teams: [team("a", 2, 2), team("b", 2, 2)],
+      idealTeamSize: 2,
+      constraints: [balance],
+      questions: [codingQ],
+      timeLimitSeconds: 10,
+    };
+    // Both respondents answered 5, so the mean is 5 and every deviation is zero:
+    // there is nothing to balance and no split should be penalised.
+    const together = evaluateAssignment(input, { a: ["hash0", "hash1"], b: ["hash2", "hash3"] });
+    const apart = evaluateAssignment(input, { a: ["hash0", "hash2"], b: ["hash1", "hash3"] });
+    expect(together.totalPenalty).toBe(apart.totalPenalty);
+    expect(together.details.some((d) => d.label.includes("Imbalanced"))).toBe(false);
+  });
+
+  it("still balances the students who did answer", () => {
+    const students = [
+      student(0, { coding: 5 }),
+      student(1, { coding: 5 }),
+      student(2, { coding: 1 }),
+      student(3, { coding: 1 }),
+    ];
+    const input: SolverInput = {
+      students,
+      teams: [team("a", 2, 2), team("b", 2, 2)],
+      idealTeamSize: 2,
+      constraints: [balance],
+      questions: [codingQ],
+      timeLimitSeconds: 10,
+    };
+    const stacked = evaluateAssignment(input, { a: ["hash0", "hash1"], b: ["hash2", "hash3"] });
+    const mixed = evaluateAssignment(input, { a: ["hash0", "hash2"], b: ["hash1", "hash3"] });
+    expect(stacked.totalPenalty).toBeGreaterThan(mixed.totalPenalty);
+  });
 });

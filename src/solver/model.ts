@@ -13,7 +13,7 @@
 // every student on exactly one team; team size within [min, max].
 
 import { WEIGHT_VALUES, type NumberQuestion } from "../types";
-import { hasValue, numericAnswer, rankedProjects, teammateHashes } from "./answers";
+import { hasValue, numericAnswer, optionalNumericAnswer, rankedProjects, teammateHashes } from "./answers";
 import type { SolverInput } from "./types";
 
 export interface BuiltModel {
@@ -129,14 +129,21 @@ export function buildModel(input: SolverInput): BuiltModel {
     if (c.kind === "balanceNumeric") {
       const q = questions.find((qq) => qq.id === c.questionId);
       const range = q && q.kind === "number" ? Math.max(1, (q as NumberQuestion).max - (q as NumberQuestion).min) : 1;
-      const values = students.map((s) => numericAnswer(s.answers[c.questionId]));
-      const mean = values.reduce((a, b) => a + b, 0) / Math.max(1, nS);
+      // Students who never answered this question are left out of both the
+      // mean and the per-team deviation. Counting them as 0 put them below the
+      // bottom of the scale, so the optimizer worked to spread non-respondents
+      // around as though they were the weakest students in the class — while
+      // the allocation screen told the instructor they had no attributes.
+      const values = students.map((s) => optionalNumericAnswer(s.answers[c.questionId]));
+      const answered = values.filter((v): v is number => v != null);
+      if (answered.length === 0) continue;
+      const mean = answered.reduce((a, b) => a + b, 0) / answered.length;
       const unitWeight = W / range; // one "range unit" of imbalance costs W
       for (let t = 0; t < nT; t++) {
         const bp = `bp_${c.id}_${t}`;
         const bm = `bm_${c.id}_${t}`;
         const centered = students
-          .map((_, i) => [values[i] - mean, x(i, t)] as [number, string])
+          .map((_, i) => [values[i] == null ? 0 : values[i]! - mean, x(i, t)] as [number, string])
           .filter(([coef]) => Math.abs(coef) > 1e-9);
         obj.push([unitWeight, bp], [unitWeight, bm]);
         con(`${terms([...centered, [-1, bp] as [number, string], [1, bm] as [number, string]])} = 0`);

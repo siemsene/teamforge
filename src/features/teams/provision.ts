@@ -51,33 +51,50 @@ const emptyContract = (): ContractState => ({
 
 export interface ProvisionResult {
   studentPatches: { hash: string; roster: AesEnvelope }[];
-  teamDocs: { tokenHash: string; team: TeamDoc }[];
+  /** Teams to write. `reused` teams keep an existing doc, so the caller must
+   * not overwrite its contract or nicknames. */
+  teamDocs: { tokenHash: string; team: TeamDoc; reused: boolean }[];
+  /** Token hashes of teams in the previous directory that no longer exist. */
+  staleTokenHashes: string[];
   directoryPayload: EciesPayload;
 }
 
 /**
  * Derives keys and seals every artifact. `onProgress` is called as each member
  * key is derived (the slow part — one PBKDF2 per student).
+ *
+ * `previous` is the directory from an earlier provisioning run, when there is
+ * one. A team's doc id is the hash of its token, and the contract and everyone's
+ * chosen display names live in that doc — so minting a fresh token for a team
+ * that already exists silently orphans all of it. Any team whose label we have
+ * seen before therefore keeps its token, and only genuinely new teams get a new
+ * one. Labels that have disappeared are reported back for deletion.
  */
 export async function buildProvisioning(
   sid: string,
   sessionPublicKeyJwk: JsonWebKey,
   teams: ResolvedTeam[],
   onProgress?: (done: number, total: number) => void,
+  previous?: TeamDirectory | null,
 ): Promise<ProvisionResult> {
   const totalMembers = teams.reduce((n, t) => n + t.members.length, 0);
   let done = 0;
 
+  const tokenByLabel = new Map((previous?.teams ?? []).map((t) => [t.label, t.token]));
+  const keptLabels = new Set(teams.map((t) => t.label));
+
   const studentPatches: { hash: string; roster: AesEnvelope }[] = [];
-  const teamDocs: { tokenHash: string; team: TeamDoc }[] = [];
+  const teamDocs: { tokenHash: string; team: TeamDoc; reused: boolean }[] = [];
   const directory: TeamDirectory = { createdAt: Date.now(), teams: [], memberKeys: {} };
 
   for (const team of teams) {
-    const token = generateTeamToken();
+    const existingToken = tokenByLabel.get(team.label);
+    const token = existingToken ?? generateTeamToken();
     const tokenHash = await hashTeamToken(token);
     teamDocs.push({
       tokenHash,
       team: { teamLabel: team.label, createdAt: Date.now(), contract: emptyContract(), nicknames: {} },
+      reused: existingToken != null,
     });
     directory.teams.push({
       token,
@@ -103,8 +120,15 @@ export async function buildProvisioning(
     }
   }
 
+  // Teams that were in the old directory and are not in the new roster. Their
+  // docs would otherwise linger and show up twice on the instructor's Teams tab.
+  const staleTokenHashes: string[] = [];
+  for (const old of previous?.teams ?? []) {
+    if (!keptLabels.has(old.label)) staleTokenHashes.push(await hashTeamToken(old.token));
+  }
+
   const directoryPayload = await eciesEncrypt(sessionPublicKeyJwk, JSON.stringify(directory));
-  return { studentPatches, teamDocs, directoryPayload };
+  return { studentPatches, teamDocs, staleTokenHashes, directoryPayload };
 }
 
 /** How to refer to a roster row in an error message. Prefers the preview-only

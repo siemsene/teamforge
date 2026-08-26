@@ -8,7 +8,7 @@ import {
 } from "../../lib/evalValidation";
 import type { EvalRoundId, Nicknames, PeerEvalAnswers, PublicTeamMgmt, RosterInfo } from "../../types";
 import { displayName } from "../../lib/nicknames";
-import { Button, Input, TextArea } from "../../components/ui";
+import { Button, Input, NumberInput, TextArea } from "../../components/ui";
 
 /**
  * The fixed three-part peer-evaluation form (100-point allocation, optional
@@ -184,15 +184,17 @@ export function PeerEvalForm({
                     >
                       −
                     </Button>
-                    <Input
-                      type="number"
+                    {/* NumberInput rather than a raw Input: clearing the field
+                        used to snap straight to 0 and then strand a leading
+                        zero as soon as you typed the real number. */}
+                    <NumberInput
                       min={0}
                       max={100}
                       inputMode="numeric"
                       className="w-20 text-center"
                       aria-label={`Points for ${displayName(t.codeIndex, nicknames)}`}
-                      value={String(value)}
-                      onChange={(e) => setPoint(t.codeIndex, Number(e.target.value) || 0)}
+                      value={value}
+                      onValueChange={(n) => setPoint(t.codeIndex, n)}
                     />
                     <Button
                       variant="secondary"

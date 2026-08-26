@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { getStudentByHash, getTeamByTokenHash, setNickname } from "../../lib/db";
+import { getStudentByHash, getTeamByTokenHash, setNickname, watchTeam } from "../../lib/db";
 import { deriveMemberKey, deriveTeamKey, hashTeamToken, openEnvelope } from "../../lib/memberKey";
 import { displayName, openNicknames, sealNickname } from "../../lib/nicknames";
 import type { EvalRoundId, Nicknames, PublicConfig, RosterInfo, StudentDoc, TeamDoc } from "../../types";
@@ -63,6 +63,29 @@ export function StudentHub({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sid, code]);
 
+  // Live view of the team document. Any member may edit the contract and every
+  // member picks their own display name, so the team doc changes underneath a
+  // student who is doing nothing. Polling it only when *this* student saved was
+  // why the "a teammate saved a newer version" warning could never fire.
+  useEffect(() => {
+    if (!roster || !teamKey) return;
+    let unsub: (() => void) | undefined;
+    let cancelled = false;
+    (async () => {
+      const tokenHash = await hashTeamToken(roster.teamToken);
+      if (cancelled) return;
+      unsub = watchTeam(sid, tokenHash, (doc) => {
+        if (!doc) return;
+        setTeam({ ...doc, tokenHash });
+        void openNicknames(teamKey, doc.nicknames).then(setNicknames);
+      });
+    })();
+    return () => {
+      cancelled = true;
+      unsub?.();
+    };
+  }, [sid, roster, teamKey]);
+
   async function refresh() {
     const [fresh, info] = [await getStudentByHash(sid, hash), roster];
     if (fresh) setCurrent(fresh);
@@ -86,13 +109,13 @@ export function StudentHub({
       await setNickname(sid, team.tokenHash, roster.codeIndex, sealed);
       await refresh();
     } catch (e) {
-      // Teams provisioned before display names existed have no nicknames map,
-      // which the security rules require — say so rather than showing a raw
-      // permission error the student cannot act on.
+      // The rules now let the first writer create the nicknames map, so a
+      // permission error here means something else — most often that the
+      // instructor changed the teams and this student has moved.
       const message = e instanceof Error ? e.message : String(e);
       setError(
-        /permission/i.test(message) && !team.nicknames
-          ? "This team was set up before display names were added. Ask your instructor to re-upload the roster on the Teams tab, then try again."
+        /permission/i.test(message)
+          ? "Could not save that name. Your team may have changed — reload the page and try again."
           : message,
       );
     } finally {

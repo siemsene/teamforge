@@ -56,6 +56,18 @@ export const LOW_FACTOR_FLAG = 0.9;
 export const SPREAD_FLAG = 0.2;
 /** Fewest real raters that still leaves a value after trimming both ends. */
 export const MIN_RATERS_TO_TRIM = 3;
+/**
+ * Fewest real raters before a factor may be published back to the student.
+ *
+ * `shareToFactor` is invertible outside the dead band, so a published factor is
+ * a published share. With one real ballot that share *is* that teammate's
+ * allocation, and the student can read it straight off — which is exactly what
+ * the anonymity guard on `share` exists to prevent. Below this the student is
+ * shown 1.00 and told why; the instructor still sees the computed value.
+ */
+export const MIN_RATERS_TO_PUBLISH = 2;
+/** Fewest real raters before per-share detail is returned to the student. */
+export const MIN_RATERS_FOR_DETAIL = 3;
 
 /**
  * Fills in defaults for configs written before the dead band existed, so old
@@ -168,6 +180,33 @@ export function shareToFactor(share: number, params: FactorParams): number {
   const beyond = Math.max(0, Math.abs(d) - params.deadband);
   const raw = 1 + params.damping * Math.sign(d) * beyond;
   return Math.min(params.factorCeiling, Math.max(params.factorFloor, raw));
+}
+
+/**
+ * Whether the caps make coordinated scapegoating a losing move on a team of
+ * this size.
+ *
+ * The play is n-1 members agreeing to sink the last one. Each of them can gain
+ * at most `ceiling - 1`; the target can lose at most `1 - floor`. So the play is
+ * negative-sum exactly while
+ *
+ *     (n - 1) * (ceiling - 1)  <  (1 - floor)
+ *
+ * which is a statement about team size, not only about the caps. At the
+ * defaults (1.05 / 0.70) it holds comfortably at five and breaks at eight, so a
+ * claim made without reference to n is not a claim that can be relied on.
+ */
+export function scapegoatingIsNegativeSum(teamSize: number, params: FactorParams): boolean {
+  return (teamSize - 1) * (params.factorCeiling - 1) < 1 - params.factorFloor;
+}
+
+/** Largest team for which `scapegoatingIsNegativeSum` still holds. */
+export function maxTeamSizeForNegativeSum(params: FactorParams): number {
+  const gain = params.factorCeiling - 1;
+  if (gain <= 0) return Infinity;
+  // Largest n with (n-1) * gain < (1 - floor).
+  const loss = 1 - params.factorFloor;
+  return Math.max(1, Math.ceil(loss / gain));
 }
 
 /** How tightly clustered received shares must be to read as coordinated. */

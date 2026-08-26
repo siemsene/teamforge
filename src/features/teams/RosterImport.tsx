@@ -1,6 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSession } from "../sessions/SessionContext";
-import { getAllocationDoc, provisionRoster, saveTeamDirectory, saveTeamMgmt } from "../../lib/db";
+import {
+  getAllocationDoc,
+  getTeamDirectoryDoc,
+  provisionRoster,
+  saveTeamDirectory,
+  saveTeamMgmt,
+} from "../../lib/db";
 import { eciesDecrypt } from "../../lib/crypto";
 import { defaultTeamMgmtConfig, publicTeamMgmt } from "./contractTemplate";
 import { groupByTeam, parseRosterCsv } from "./rosterCsv";
@@ -14,7 +20,7 @@ import {
 import { buildProvisioning, resolveRoster, type ResolvedTeam } from "./provision";
 import { Button, Card, ErrorText, Spinner } from "../../components/ui";
 import { UnlockPanel } from "../sessions/UnlockPanel";
-import type { Allocation, TeamMgmtConfig } from "../../types";
+import type { Allocation, TeamDirectory, TeamMgmtConfig } from "../../types";
 
 type Stage =
   | { name: "idle" }
@@ -50,7 +56,14 @@ type AllocationState =
  * instructor can confirm they picked the right file, but it never leaves this
  * component — students choose their own display names.
  */
-export function RosterImport({ existingConfig }: { existingConfig?: TeamMgmtConfig }) {
+export function RosterImport({
+  existingConfig,
+  onDone,
+}: {
+  existingConfig?: TeamMgmtConfig;
+  /** Called after a successful (re-)provision, so the caller can close the panel. */
+  onDone?: () => void;
+}) {
   const { sid, session, projects, students, sessionKey, setSessionKey } = useSession();
   const [stage, setStage] = useState<Stage>({ name: "idle" });
   const [allocation, setAllocation] = useState<AllocationState>({ name: "loading" });
@@ -59,6 +72,13 @@ export function RosterImport({ existingConfig }: { existingConfig?: TeamMgmtConf
   const fileRef = useRef<HTMLInputElement>(null);
 
   const labels = useMemo(() => teamLabels(session, projects), [session, projects]);
+
+  // A session that has been provisioned before carries contracts and chosen
+  // display names in its team docs. Reaching those needs the previous directory,
+  // which is encrypted — so re-provisioning locked would mint fresh tokens and
+  // orphan the lot. Require the passphrase rather than quietly destroying it.
+  const reprovisioning = existingConfig?.rosterUploadedAt != null;
+  const needsUnlock = reprovisioning && !sessionKey;
 
   useEffect(() => {
     let cancelled = false;
@@ -134,14 +154,32 @@ export function RosterImport({ existingConfig }: { existingConfig?: TeamMgmtConf
     setError("");
     setStage({ name: "provisioning", done: 0, total: teams.reduce((n, t) => n + t.members.length, 0) });
     try {
-      const built = await buildProvisioning(sid, session.wrappedKeys.publicKeyJwk, teams, (done, total) =>
-        setStage({ name: "provisioning", done, total }),
+      // On a re-upload, hand the previous directory in so teams that already
+      // exist keep their token — and therefore their doc, their contract and
+      // everyone's chosen display names. Without it, provisioning again would
+      // quietly throw all of that away.
+      let previous: TeamDirectory | null = null;
+      if (sessionKey) {
+        const dirDoc = await getTeamDirectoryDoc(sid);
+        if (dirDoc) previous = JSON.parse(await eciesDecrypt(sessionKey, dirDoc.payload)) as TeamDirectory;
+      } else if (reprovisioning) {
+        throw new Error(
+          "Unlock this session first — without the passphrase the existing teams cannot be matched up, and their contracts and display names would be lost.",
+        );
+      }
+      const built = await buildProvisioning(
+        sid,
+        session.wrappedKeys.publicKeyJwk,
+        teams,
+        (done, total) => setStage({ name: "provisioning", done, total }),
+        previous,
       );
-      await provisionRoster(sid, built.studentPatches, built.teamDocs);
+      await provisionRoster(sid, built.studentPatches, built.teamDocs, built.staleTokenHashes);
       await saveTeamDirectory(sid, built.directoryPayload);
       const config: TeamMgmtConfig = { ...(existingConfig ?? defaultTeamMgmtConfig()), rosterUploadedAt: Date.now() };
       await saveTeamMgmt(sid, config, publicTeamMgmt(config));
       setStage({ name: "done" });
+      onDone?.();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       setStage({ name: "idle" });
@@ -246,6 +284,17 @@ export function RosterImport({ existingConfig }: { existingConfig?: TeamMgmtConf
     );
   }
 
+  if (needsUnlock) {
+    return (
+      <UnlockPanel
+        wrapped={session.wrappedKeys}
+        title="Unlock to change the teams"
+        intro="These teams already have contracts and student-chosen display names, held in documents that only the encrypted team directory can point at. Enter your passphrase (or recovery key) so the new roster can be matched against the old one and that work kept."
+        onUnlocked={setSessionKey}
+      />
+    );
+  }
+
   if (showUnlock && allocation.name === "locked") {
     return (
       <UnlockPanel
@@ -262,7 +311,17 @@ export function RosterImport({ existingConfig }: { existingConfig?: TeamMgmtConf
 
   return (
     <Card>
-      <h3 className="mb-2 font-semibold">Upload your login-codes CSV</h3>
+      <h3 className="mb-2 font-semibold">
+        {reprovisioning ? "Re-upload your login-codes CSV" : "Upload your login-codes CSV"}
+      </h3>
+
+      {reprovisioning && (
+        <p className="mb-3 rounded-md border border-amber-200 bg-amber-50 p-2 text-sm text-amber-900">
+          This session already has teams. A team whose label is unchanged keeps its contract and its members&rsquo;
+          chosen display names; a team that no longer appears is deleted along with both. Students who move team see
+          the new one on their next login.
+        </p>
+      )}
 
       {allocation.name === "ready" && (
         <p className="mb-3 text-sm text-slate-600">

@@ -45,13 +45,20 @@ export function OverviewTab() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [confirmReopen, setConfirmReopen] = useState(false);
   const dirty = template !== (session.emailTemplate ?? fallback);
   const readiness = getSessionReadiness(session, publicConfig, projects);
 
   async function copy(text: string, which: string) {
-    await navigator.clipboard.writeText(text);
-    setCopied(which);
-    setTimeout(() => setCopied(""), 1500);
+    // Unavailable over plain HTTP and blockable by permission, so a bare await
+    // here rejected unhandled and left the button looking like it did nothing.
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(which);
+      setTimeout(() => setCopied(""), 1500);
+    } catch {
+      setError("Could not copy to the clipboard — select the text and copy it by hand.");
+    }
   }
 
   async function changeStatus(status: SessionStatus) {
@@ -60,8 +67,24 @@ export function OverviewTab() {
       setError(`Before opening, fix: ${readiness.blockers.map((i) => i.label).join(", ")}.`);
       return;
     }
+    // Reopening after allocating invites new and changed responses, which the
+    // saved allocation was not built from. Better to ask than to let the roster
+    // drift out of step with the answers behind it.
+    if (status === "open" && session.status === "closed") {
+      setConfirmReopen(true);
+      return;
+    }
     try {
       await updateSessionStatus(sid, status);
+    } catch (e) {
+      setError(`Could not change status: ${errMsg(e)}`);
+    }
+  }
+
+  async function reopen() {
+    setConfirmReopen(false);
+    try {
+      await updateSessionStatus(sid, "open");
     } catch (e) {
       setError(`Could not change status: ${errMsg(e)}`);
     }
@@ -251,6 +274,20 @@ export function OverviewTab() {
           </Button>
         </div>
       </Card>
+      <ConfirmDialog
+        open={confirmReopen}
+        tone="primary"
+        title="Reopen the survey?"
+        confirmLabel="Reopen"
+        onCancel={() => setConfirmReopen(false)}
+        onConfirm={reopen}
+      >
+        <p>
+          Students will be able to submit, change and withdraw answers again. Any allocation you have already saved was
+          worked out from the answers as they stand now, so it will not reflect what changes.
+        </p>
+        <p>Re-run the optimizer on the Allocation tab before you announce teams.</p>
+      </ConfirmDialog>
       <ConfirmDialog
         open={confirmDelete}
         title="Delete entire session?"

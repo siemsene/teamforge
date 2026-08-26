@@ -123,6 +123,13 @@ export function PeerEvalCard({
           <p className="text-sm text-slate-600">
             You submitted this evaluation. You can revise or withdraw it while the round is open.
           </p>
+          {/* The survey says this too. Your ballot is encrypted to your
+              instructor, so this page genuinely cannot read it back. */}
+          <p className="text-sm text-slate-500">
+            Revising starts from a fresh even split rather than your previous answers — they are encrypted so that only
+            your instructor can read them, which means this page cannot show them back to you. Whatever you submit
+            replaces what you sent before.
+          </p>
           <div className="flex gap-2">
             <Button variant="secondary" onClick={() => setEditing(true)}>
               Revise

@@ -116,12 +116,16 @@ export function validatePeerEval(
   const problems: string[] = [];
   const n = teammateCodeIndexes.length;
   if (n === 0) return ["You have no teammates to evaluate."];
+  // Tolerate missing objects. This also runs against decrypted ballots, which
+  // are only as well-formed as whoever wrote them (see validateSubmittedBallot).
+  const points = answers.points ?? {};
+  const justifications = answers.justifications ?? {};
   const deadband = config.deadband ?? DEFAULT_FACTOR_PARAMS.deadband;
   const { low, high } = neutralRange(n, deadband);
 
   let total = 0;
   for (const idx of teammateCodeIndexes) {
-    const pts = answers.points[String(idx)];
+    const pts = points[String(idx)];
     if (typeof pts !== "number" || Number.isNaN(pts)) {
       problems.push(`Missing a point allocation for teammate #${idx}.`);
       continue;
@@ -129,13 +133,13 @@ export function validatePeerEval(
     if (!Number.isInteger(pts)) problems.push(`Points for teammate #${idx} must be a whole number.`);
     if (pts < 0 || pts > 100) problems.push(`Points for teammate #${idx} must be between 0 and 100.`);
     total += pts;
-    if (needsJustification(pts, n, deadband) && !answers.justifications[String(idx)]?.trim()) {
+    if (needsJustification(pts, n, deadband) && !justifications[String(idx)]?.trim()) {
       problems.push(
         `An allocation outside ${low}-${high} needs one sentence of justification (teammate #${idx}).`,
       );
     }
   }
-  const extra = Object.keys(answers.points).filter((k) => !teammateCodeIndexes.includes(Number(k)));
+  const extra = Object.keys(points).filter((k) => !teammateCodeIndexes.includes(Number(k)));
   if (extra.length > 0) problems.push("Points were allocated to someone who is not a teammate.");
   if (total !== 100) problems.push(`Points must sum to exactly 100 (currently ${total}).`);
 
@@ -152,4 +156,38 @@ export function validatePeerEval(
     }
   }
   return problems;
+}
+
+/**
+ * Re-checks a *decrypted* ballot on the instructor's side.
+ *
+ * The student's form validates before submitting, but that is the only place it
+ * happens: submissions are ECIES-encrypted, so the security rules can only
+ * check the envelope's shape, never its contents. Anyone willing to open a
+ * console can post a ballot that allocates 400 points, or negative ones, and
+ * `computeTeamFactors` would fold it into every teammate's grade.
+ *
+ * So the same rules run again here, against the roster the instructor holds
+ * rather than against anything the ballot claims about itself. `raterCodeIndex`
+ * and `teamLabel` are checked too — a ballot is only ever read from the doc of
+ * the student it belongs to, so a mismatch means the payload was hand-made.
+ */
+export function validateSubmittedBallot(
+  answers: PeerEvalAnswers,
+  expected: { raterCodeIndex: number; teammateCodeIndexes: number[]; teamLabel: string },
+  config: EvalValidationConfig,
+): string[] {
+  const problems: string[] = [];
+  if (answers.raterCodeIndex !== expected.raterCodeIndex) {
+    problems.push(
+      `Ballot claims to be from #${answers.raterCodeIndex} but was submitted by #${expected.raterCodeIndex}.`,
+    );
+  }
+  if (answers.teamLabel !== expected.teamLabel) {
+    problems.push(`Ballot names team "${answers.teamLabel}" but the rater is on "${expected.teamLabel}".`);
+  }
+  if (!answers.points || typeof answers.points !== "object") {
+    return [...problems, "Ballot carries no point allocation."];
+  }
+  return [...problems, ...validatePeerEval(answers, expected.teammateCodeIndexes, config)];
 }

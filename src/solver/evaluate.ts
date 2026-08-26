@@ -3,7 +3,7 @@
 // objective. Returns per-team detail rows for the violations panel.
 
 import { WEIGHT_VALUES, type NumberQuestion } from "../types";
-import { hasValue, numericAnswer, rankedProjects, teammateHashes } from "./answers";
+import { hasValue, numericAnswer, optionalNumericAnswer, rankedProjects, teammateHashes } from "./answers";
 import type { SolverInput, SolverStudent } from "./types";
 
 export interface ViolationDetail {
@@ -99,10 +99,20 @@ export function evaluateAssignment(input: SolverInput, assignment: Record<string
     if (c.kind === "balanceNumeric") {
       const q = questions.find((qq) => qq.id === c.questionId);
       const range = q && q.kind === "number" ? Math.max(1, (q as NumberQuestion).max - (q as NumberQuestion).min) : 1;
-      const mean = students.reduce((a, s) => a + numericAnswer(s.answers[c.questionId]), 0) / Math.max(1, students.length);
+      // Mirrors buildModel: students with no answer to this question sit out of
+      // the mean and out of each team's deviation, rather than counting as a 0
+      // that is below the bottom of the scale.
+      const answered = students
+        .map((s) => optionalNumericAnswer(s.answers[c.questionId]))
+        .filter((v): v is number => v != null);
+      if (answered.length === 0) continue;
+      const mean = answered.reduce((a, b) => a + b, 0) / answered.length;
       for (const team of teams) {
         const m = members.get(team.id)!;
-        const centeredSum = m.reduce((a, s) => a + numericAnswer(s.answers[c.questionId]) - mean, 0);
+        const centeredSum = m.reduce((a, s) => {
+          const v = optionalNumericAnswer(s.answers[c.questionId]);
+          return v == null ? a : a + v - mean;
+        }, 0);
         const penalty = (W / range) * Math.abs(centeredSum);
         if (penalty > 0.5) {
           details.push({

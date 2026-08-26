@@ -18,7 +18,8 @@ const ROUND_LABEL: Record<string, string> = {
  * without the range it sits in. Each figure is shown against what it measures.
  *
  * Per-share detail and behaviour averages appear only when at least three
- * teammates rated them, so no single rater's answer can be inferred.
+ * teammates rated them, and the factor itself is withheld below two, so no
+ * single rater's answer can be inferred from any figure shown here.
  */
 export function FormativeResults({
   memberKey,
@@ -69,40 +70,59 @@ export function FormativeResults({
     <Card>
       <h2 className="mb-3 font-semibold">Your results — {ROUND_LABEL[view.round] ?? view.round}</h2>
 
-      <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
-        <p className="text-xs uppercase tracking-wide text-slate-500">Your team factor</p>
-        <p className={`text-4xl font-bold tabular-nums ${tone}`}>{view.factor.toFixed(2)}</p>
-
-        <div className="mt-4" aria-hidden="true">
-          {/* The range is deliberately asymmetric — losses run deeper than
-              gains — so 1.00 is rarely the midpoint. Its label tracks its tick
-              rather than sitting centred, which would misstate where an even
-              share falls. */}
-          <div className="relative mb-1 h-4 text-xs text-slate-500">
-            <span
-              className="absolute -translate-x-1/2 whitespace-nowrap"
-              style={{ left: `${Math.min(94, Math.max(6, evenPercent))}%` }}
-            >
-              even share 1.00
-            </span>
-          </div>
-          <div className="relative h-2 rounded-full bg-slate-200">
-            <div className="absolute inset-y-0 w-px bg-slate-400" style={{ left: `${evenPercent}%` }} />
-            <div
-              className="absolute top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white bg-indigo-600 shadow"
-              style={{ left: `${gaugePercent(view.factor, floor, ceiling)}%` }}
-            />
-          </div>
-          <div className="mt-1 flex justify-between text-xs text-slate-500">
-            <span>lowest possible {floor.toFixed(2)}</span>
-            <span>highest possible {ceiling.toFixed(2)}</span>
-          </div>
+      {view.factorWithheld ? (
+        // A factor is worked back to the share it came from with simple
+        // arithmetic, and with one ballot that share *is* what that teammate
+        // said. Showing a number here would hand it over, so there is none.
+        <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+          <p className="text-xs uppercase tracking-wide text-slate-500">Your team factor</p>
+          <p className="text-2xl font-semibold text-slate-700">Not applied this round</p>
+          <p className="mt-2 text-sm text-slate-700">
+            {view.raterCount === 0
+              ? "No teammate submitted an evaluation for you this round, so there is nothing to work a factor out from."
+              : "Only one teammate submitted an evaluation for you this round. A factor can be worked backwards to the rating behind it, so showing you one would tell you exactly what that single teammate said."}
+          </p>
+          <p className="mt-1 text-sm text-slate-600">
+            The team-scored part of your grade is left unchanged.
+          </p>
         </div>
+      ) : (
+        <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+          <p className="text-xs uppercase tracking-wide text-slate-500">Your team factor</p>
+          <p className={`text-4xl font-bold tabular-nums ${tone}`}>{view.factor.toFixed(2)}</p>
 
-        <p className="mt-3 text-sm text-slate-700">{factorMeaning(view.factor)}</p>
-        <p className="text-sm text-slate-600">{factorEffect(view.factor)}</p>
-      </div>
+          <div className="mt-4" aria-hidden="true">
+            {/* The range is deliberately asymmetric — losses run deeper than
+                gains — so 1.00 is rarely the midpoint. Its label tracks its tick
+                rather than sitting centred, which would misstate where an even
+                share falls. */}
+            <div className="relative mb-1 h-4 text-xs text-slate-500">
+              <span
+                className="absolute -translate-x-1/2 whitespace-nowrap"
+                style={{ left: `${Math.min(94, Math.max(6, evenPercent))}%` }}
+              >
+                even share 1.00
+              </span>
+            </div>
+            <div className="relative h-2 rounded-full bg-slate-200">
+              <div className="absolute inset-y-0 w-px bg-slate-400" style={{ left: `${evenPercent}%` }} />
+              <div
+                className="absolute top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white bg-indigo-600 shadow"
+                style={{ left: `${gaugePercent(view.factor, floor, ceiling)}%` }}
+              />
+            </div>
+            <div className="mt-1 flex justify-between text-xs text-slate-500">
+              <span>lowest possible {floor.toFixed(2)}</span>
+              <span>highest possible {ceiling.toFixed(2)}</span>
+            </div>
+          </div>
 
+          <p className="mt-3 text-sm text-slate-700">{factorMeaning(view.factor)}</p>
+          <p className="text-sm text-slate-600">{factorEffect(view.factor)}</p>
+        </div>
+      )}
+
+      {!view.factorWithheld && (
       <div className="mt-4">
         <h3 className="mb-1 text-sm font-semibold">How this was worked out</h3>
         {detailed ? (
@@ -130,11 +150,12 @@ export function FormativeResults({
           </ul>
         ) : (
           <p className="text-sm text-slate-600">
-            Fewer than three teammates rated you, so only the overall factor is shown — anything more could point to
-            who said what.
+            {view.raterCount} of your teammates rated you. That is too few to show the figures behind the result
+            without pointing to who said what, so they are left out.
           </p>
         )}
       </div>
+      )}
 
       {scores.length > 0 && (
         <div className="mt-4">
@@ -163,8 +184,9 @@ export function FormativeResults({
       )}
 
       <p className="mt-4 text-xs text-slate-500">
-        These are averages across your teammates. You are never shown who said what, and your teammates never see your
-        results.
+        {view.factorWithheld
+          ? "You are never shown who said what, and your teammates never see your results."
+          : "These are averages across your teammates. You are never shown who said what, and your teammates never see your results."}
       </p>
     </Card>
   );

@@ -5,10 +5,13 @@ import { eciesDecrypt, fromBase64 } from "../../lib/crypto";
 import { importMemberKey, sealEnvelope } from "../../lib/memberKey";
 import { openDirectoryNicknames } from "../../lib/nicknames";
 import { publicTeamMgmt } from "../teams/contractTemplate";
+import { validateSubmittedBallot } from "../../lib/evalValidation";
 import { downloadFile, sessionFilename, toCsv } from "../../lib/util";
 import { buildDetailRows, buildSummaryRows } from "../../lib/evalExport";
 import {
   LOW_FACTOR_FLAG,
+  MIN_RATERS_FOR_DETAIL,
+  MIN_RATERS_TO_PUBLISH,
   computeTeamFactors,
   resolveFactorParams,
   type TeamFactorResult,
@@ -22,6 +25,13 @@ import type {
   TeamDirectory,
 } from "../../types";
 import { Badge, Button, Card, ErrorText } from "../../components/ui";
+
+/** A decrypted ballot the instructor's own re-check rejected. */
+interface RejectedBallot {
+  raterCodeIndex: number;
+  teamLabel: string;
+  reasons: string[];
+}
 import { UnlockPanel } from "../sessions/UnlockPanel";
 
 export function EvalReview() {
@@ -38,6 +48,8 @@ export function EvalReview() {
         {
           directory: TeamDirectory;
           byRater: Map<string, PeerEvalAnswers>;
+          /** Ballots excluded by the instructor-side re-check. */
+          rejected: RejectedBallot[];
           nicknames: Nicknames;
           /** Submissions at the moment this was computed, to spot staleness. */
           computedFrom: number;
@@ -65,23 +77,69 @@ export function EvalReview() {
       const dirDoc = await getTeamDirectoryDoc(sid);
       if (!dirDoc) throw new Error("No team directory — re-provision the roster on the Teams tab.");
       const directory = JSON.parse(await eciesDecrypt(sessionKey, dirDoc.payload)) as TeamDirectory;
-      const byRater = new Map<string, PeerEvalAnswers>();
-      for (const s of students) {
-        const sub = s[roundField];
-        if (sub) {
-          try {
-            byRater.set(s.hash, JSON.parse(await eciesDecrypt(sessionKey, sub.payload)) as PeerEvalAnswers);
-          } catch {
-            /* skip unreadable submission */
-          }
+
+      // Who each rater's ballot is allowed to talk about, from the roster we
+      // hold — never from anything the ballot asserts about itself.
+      const expectedByHash = new Map<string, { raterCodeIndex: number; teammateCodeIndexes: number[]; teamLabel: string }>();
+      for (const team of directory.teams) {
+        for (const m of team.members) {
+          expectedByHash.set(m.codeHash, {
+            raterCodeIndex: m.codeIndex,
+            teamLabel: team.label,
+            teammateCodeIndexes: team.members.filter((o) => o.codeIndex !== m.codeIndex).map((o) => o.codeIndex),
+          });
         }
       }
+      const validationConfig = {
+        includeBehaviors: tm.includeBehaviors,
+        behaviorCount: tm.behaviors.length,
+        deadband: resolveFactorParams(tm).deadband,
+      };
+
+      const byRater = new Map<string, PeerEvalAnswers>();
+      const rejected: RejectedBallot[] = [];
+      for (const s of students) {
+        const sub = s[roundField];
+        if (!sub) continue;
+        let answers: PeerEvalAnswers;
+        try {
+          answers = JSON.parse(await eciesDecrypt(sessionKey, sub.payload)) as PeerEvalAnswers;
+        } catch {
+          rejected.push({
+            raterCodeIndex: s.codeIndex,
+            teamLabel: expectedByHash.get(s.hash)?.teamLabel ?? "—",
+            reasons: ["Could not be decrypted or parsed."],
+          });
+          continue;
+        }
+        const expected = expectedByHash.get(s.hash);
+        if (!expected) {
+          rejected.push({
+            raterCodeIndex: s.codeIndex,
+            teamLabel: "—",
+            reasons: ["Submitted a ballot but is not on any team in the roster."],
+          });
+          continue;
+        }
+        // The student's form checks this before submitting, but the form is the
+        // only thing that does: the payload is encrypted, so the security rules
+        // can never see inside it. Anything that fails here is excluded rather
+        // than scored, which leaves the rater imputed at an even split — the
+        // same neutral treatment a teammate who never submitted receives.
+        const reasons = validateSubmittedBallot(answers, expected, validationConfig);
+        if (reasons.length > 0) {
+          rejected.push({ raterCodeIndex: s.codeIndex, teamLabel: expected.teamLabel, reasons });
+          continue;
+        }
+        byRater.set(s.hash, answers);
+      }
+
       const nicknames = await openDirectoryNicknames(sid, directory.teams, (tokenHash) =>
         getTeamByTokenHash(sid, tokenHash),
       );
       setByRound((prev) => ({
         ...prev,
-        [round]: { directory, byRater, nicknames, computedFrom: submittedHashes.size },
+        [round]: { directory, byRater, rejected, nicknames, computedFrom: submittedHashes.size },
       }));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -146,21 +204,27 @@ export function EvalReview() {
           if (!m) continue;
           const rawB64 = decrypted.directory.memberKeys[member.codeHash];
           if (!rawB64) continue;
+          // Both guards key off *real* raters, never the imputed ballots that
+          // stand in for teammates who stayed silent.
+          const detailed = m.raterCount >= MIN_RATERS_FOR_DETAIL;
+          // A factor is an invertible function of the share, so publishing one
+          // computed from a single ballot hands the student that ballot. Hold
+          // it at 1.00 and say so; the instructor keeps the real number below.
+          const withheld = m.raterCount < MIN_RATERS_TO_PUBLISH;
           const view: EvalResultView = {
             round: round,
             teamLabel: team.label,
             raterCount: m.raterCount,
             neutralShare: m.neutralShare,
-            // Anonymity guard: keyed to *real* raters, never the imputed
-            // ballots that stand in for teammates who stayed silent.
-            share: m.raterCount >= 3 ? m.share : null,
-            factor: m.factor,
-            behaviorAverages: m.raterCount >= 3 && m.behaviorAverages ? m.behaviorAverages : undefined,
-            behaviors: m.raterCount >= 3 && m.behaviorAverages ? tm.behaviors : undefined,
+            share: detailed ? m.share : null,
+            factor: withheld ? 1 : m.factor,
+            factorWithheld: withheld || undefined,
+            behaviorAverages: detailed && m.behaviorAverages ? m.behaviorAverages : undefined,
+            behaviors: detailed && m.behaviorAverages ? tm.behaviors : undefined,
             factorFloor: publishParams.factorFloor,
             factorCeiling: publishParams.factorCeiling,
             note:
-              m.factor < LOW_FACTOR_FLAG
+              !withheld && m.factor < LOW_FACTOR_FLAG
                 ? "Your instructor will follow up before any grade is issued — nothing is finalized from this alone."
                 : undefined,
           };
@@ -169,6 +233,9 @@ export function EvalReview() {
         }
       }
       await publishEvalResults(sid, round, patches);
+      const withheldCount = results
+        .flatMap((r) => r.factors.members)
+        .filter((m) => m.raterCount < MIN_RATERS_TO_PUBLISH).length;
       // Mark results as published in the config so students' cards reveal them.
       const next = {
         ...tm,
@@ -178,7 +245,12 @@ export function EvalReview() {
         },
       };
       await saveTeamMgmt(sid, next, publicTeamMgmt(next));
-      setInfo(`Published ${patches.length} result summaries. Students can now see their own factor.`);
+      setInfo(
+        `Published ${patches.length} result summaries. Students can now see their own factor.` +
+          (withheldCount > 0
+            ? ` ${withheldCount} student${withheldCount === 1 ? " was" : "s were"} rated by fewer than ${MIN_RATERS_TO_PUBLISH} teammates, so ${withheldCount === 1 ? "their factor was" : "their factors were"} held at 1.00 — publishing it would have revealed a single teammate's ballot. Your table below still shows the computed value.`
+            : ""),
+      );
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -271,6 +343,26 @@ export function EvalReview() {
                     : `${decrypted.computedFrom - submitted} submission${decrypted.computedFrom - submitted === 1 ? " has" : "s have"} been withdrawn since you computed these.`}{" "}
                   Recompute to bring them up to date.
                 </p>
+              )}
+              {decrypted.rejected.length > 0 && (
+                <div className="mt-3 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-900">
+                  <p className="font-medium">
+                    {decrypted.rejected.length} ballot{decrypted.rejected.length === 1 ? "" : "s"} failed validation and
+                    {decrypted.rejected.length === 1 ? " was" : " were"} excluded.
+                  </p>
+                  <p className="mt-1">
+                    Peer evaluations are encrypted, so the server cannot check them on the way in — they are checked
+                    here instead. An excluded rater counts as an even split for everyone they were meant to rate, the
+                    same as a teammate who never submitted. Ask them to submit again while the round is open.
+                  </p>
+                  <ul className="mt-2 list-disc space-y-0.5 pl-5">
+                    {decrypted.rejected.map((r) => (
+                      <li key={`${r.teamLabel}:${r.raterCodeIndex}`}>
+                        <strong>#{r.raterCodeIndex}</strong> ({r.teamLabel}): {r.reasons.join(" ")}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
               )}
               <FactorTable results={results} nicknames={decrypted.nicknames} />
             </>
@@ -369,6 +461,11 @@ function FactorTable({
                       )}
                       {m.flags.includes("noSubmission") && <Badge tone="gray">no ballot</Badge>}
                       {m.flags.includes("noRatings") && <Badge tone="gray">no ratings</Badge>}
+                      {m.raterCount < MIN_RATERS_TO_PUBLISH && (
+                        <span title="Too few teammates rated this student for a factor to be returned without giving away what one of them said. They were shown 1.00; the figure in this table is the real one.">
+                          <Badge tone="gray">not shown to student</Badge>
+                        </span>
+                      )}
                     </span>
                   </td>
                 </tr>

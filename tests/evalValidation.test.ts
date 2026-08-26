@@ -6,6 +6,7 @@ import {
   neutralRange,
   pruneJustifications,
   validatePeerEval,
+  validateSubmittedBallot,
 } from "../src/lib/evalValidation";
 import type { PeerEvalAnswers } from "../src/types";
 
@@ -295,5 +296,77 @@ describe("evenSplit", () => {
       );
       expect(problems, `team size ${n}`).toEqual([]);
     }
+  });
+});
+
+describe("validateSubmittedBallot", () => {
+  // The instructor's re-check after decryption. Peer-eval payloads are
+  // encrypted, so the security rules can only ever see the envelope — this is
+  // the only place a hand-crafted ballot can be caught.
+  const expected = { raterCodeIndex: 1, teammateCodeIndexes: [2, 3, 4, 5], teamLabel: "Team 1" };
+  const config = { includeBehaviors: false, behaviorCount: 0 };
+
+  const good: PeerEvalAnswers = {
+    round: "summative",
+    raterCodeIndex: 1,
+    teamLabel: "Team 1",
+    points: { "2": 25, "3": 25, "4": 25, "5": 25 },
+    justifications: {},
+  };
+
+  it("accepts a ballot the form would have produced", () => {
+    expect(validateSubmittedBallot(good, expected, config)).toEqual([]);
+  });
+
+  it("rejects an allocation that does not sum to 100", () => {
+    const p = validateSubmittedBallot(
+      { ...good, points: { "2": 100, "3": 100, "4": 100, "5": 100 } },
+      expected,
+      config,
+    );
+    expect(p.some((m) => m.includes("sum to exactly 100"))).toBe(true);
+  });
+
+  it("rejects negative and out-of-range allocations", () => {
+    const p = validateSubmittedBallot(
+      { ...good, points: { "2": -50, "3": 50, "4": 50, "5": 50 } },
+      expected,
+      config,
+    );
+    expect(p.some((m) => m.includes("between 0 and 100"))).toBe(true);
+  });
+
+  it("rejects points aimed at somebody outside the team", () => {
+    const p = validateSubmittedBallot(
+      { ...good, points: { "2": 25, "3": 25, "4": 25, "5": 25, "99": 0 } },
+      expected,
+      config,
+    );
+    expect(p).toContain("Points were allocated to someone who is not a teammate.");
+  });
+
+  it("rejects a ballot claiming to be from someone else", () => {
+    const p = validateSubmittedBallot({ ...good, raterCodeIndex: 7 }, expected, config);
+    expect(p.some((m) => m.includes("claims to be from #7"))).toBe(true);
+  });
+
+  it("rejects a ballot naming a different team", () => {
+    const p = validateSubmittedBallot({ ...good, teamLabel: "Team 9" }, expected, config);
+    expect(p.some((m) => m.includes("Team 9"))).toBe(true);
+  });
+
+  it("survives a payload with the objects missing entirely", () => {
+    const wrecked = { round: "summative", raterCodeIndex: 1, teamLabel: "Team 1" } as unknown as PeerEvalAnswers;
+    expect(() => validateSubmittedBallot(wrecked, expected, config)).not.toThrow();
+    expect(validateSubmittedBallot(wrecked, expected, config).length).toBeGreaterThan(0);
+  });
+
+  it("rejects behavior ratings outside 1-5 when behaviors are on", () => {
+    const p = validateSubmittedBallot(
+      { ...good, behaviorRatings: { "2": [9], "3": [3], "4": [3], "5": [3] } },
+      expected,
+      { includeBehaviors: true, behaviorCount: 1 },
+    );
+    expect(p.some((m) => m.includes("whole numbers from 1 to 5"))).toBe(true);
   });
 });

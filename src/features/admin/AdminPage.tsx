@@ -37,7 +37,10 @@ export function AdminPage() {
     setError("");
     try {
       await setInstructorApproved(row.uid, true);
-      window.location.href = approvalEmailHref(row.name, row.email);
+      // Hand the mailto to the OS in a throwaway tab rather than navigating this
+      // one: with no mail client registered, assigning location.href leaves the
+      // admin staring at a blank page instead of the list they were working in.
+      window.open(approvalEmailHref(row.name, row.email), "_blank", "noopener");
     } catch (e) {
       setError(`Could not approve instructor: ${e instanceof Error ? e.message : String(e)}`);
     }

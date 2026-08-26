@@ -14,6 +14,33 @@ import { TeamForgeLogo } from "../../components/Brand";
 import { useAuth } from "./AuthContext";
 import { Button, Card, ErrorText, Field, Input, Spinner } from "../../components/ui";
 
+/**
+ * Firebase's own error text ("Firebase: Error (auth/email-already-in-use).")
+ * names the library and the error code, and tells the person reading it nothing
+ * about what to do. Map the ones people actually hit.
+ */
+function authErrorMessage(err: unknown): string {
+  const code = typeof err === "object" && err !== null && "code" in err ? String((err as { code: unknown }).code) : "";
+  switch (code) {
+    case "auth/email-already-in-use":
+      return "There is already an account with that email. Sign in instead, or use the password-reset link.";
+    case "auth/invalid-email":
+      return "That does not look like a valid email address.";
+    case "auth/weak-password":
+      return "Please choose a longer password — at least 8 characters.";
+    case "auth/network-request-failed":
+      return "Could not reach the server. Check your connection and try again.";
+    case "auth/too-many-requests":
+      return "Too many attempts. Please wait a few minutes and try again.";
+    case "auth/user-not-found":
+      return "No account with that email. Check the address, or register a new account.";
+    case "auth/operation-not-allowed":
+      return "Email sign-up is not enabled on this deployment. Contact the site administrator.";
+    default:
+      return err instanceof Error ? err.message : String(err);
+  }
+}
+
 function AuthShell({ title, children }: { title: string; children: ReactNode }) {
   return (
     <div className="mx-auto mt-16 max-w-md px-4">
@@ -46,13 +73,23 @@ export function SignUpPage() {
     setBusy(true);
     try {
       const cred = await createUserWithEmailAndPassword(auth, email.trim(), password);
-      await createInstructorProfile(cred.user.uid, name.trim(), email.trim(), university.trim());
+      try {
+        await createInstructorProfile(cred.user.uid, name.trim(), email.trim(), university.trim());
+      } catch (profileErr) {
+        // The account exists but has no profile, so every gate downstream reads
+        // it as "awaiting approval" forever and there is no way back to this
+        // form. Undo the half-registration so signing up again actually works.
+        await cred.user.delete().catch(() => {});
+        throw profileErr;
+      }
       // Fire-and-forget: a failed notification must not block registration.
       void notifyAdminOfRegistration(name.trim(), email.trim(), university.trim());
-      await sendEmailVerification(cred.user);
+      await sendEmailVerification(cred.user).catch(() => {
+        /* The verify screen offers a resend button; do not fail registration. */
+      });
       navigate("/dashboard");
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(authErrorMessage(err));
     } finally {
       setBusy(false);
     }
@@ -119,9 +156,25 @@ export function SignInPage() {
   }
 
   async function resetPassword() {
+    setError("");
+    setInfo("");
     if (!email.trim()) return setError("Enter your email first, then click reset.");
-    await sendPasswordResetEmail(auth, email.trim());
-    setInfo("Password reset email sent.");
+    try {
+      await sendPasswordResetEmail(auth, email.trim());
+      // Deliberately not "we found that account": confirming which addresses
+      // are registered is not something a sign-in page should do.
+      setInfo("If that address has an account, a password reset email is on its way.");
+    } catch (err) {
+      // Firebase reports an unknown address as auth/user-not-found unless email
+      // enumeration protection is switched on. Swallow it into the same neutral
+      // answer, so this page cannot be used to test whether an address is here.
+      const code = typeof err === "object" && err !== null && "code" in err ? String((err as { code: unknown }).code) : "";
+      if (code === "auth/user-not-found") {
+        setInfo("If that address has an account, a password reset email is on its way.");
+        return;
+      }
+      setError(authErrorMessage(err));
+    }
   }
 
   return (
