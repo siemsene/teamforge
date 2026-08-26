@@ -9,6 +9,7 @@ import PDFDocument from "pdfkit";
 import { createWriteStream, mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { guardPdfText } from "./pdf-text-guard.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const outPath = join(root, "public", "instructor-guide.pdf");
@@ -31,6 +32,9 @@ const doc = new PDFDocument({
     Subject: "How to run a privacy-preserving team allocation, end to end",
   },
 });
+
+// Fail loudly on any character the built-in fonts cannot encode.
+guardPdfText(doc, "instructor-guide.pdf");
 doc.pipe(createWriteStream(outPath));
 
 const PAGE_W = doc.page.width - doc.page.margins.left - doc.page.margins.right;
@@ -374,9 +378,13 @@ bullets([
 h3("Peer evaluations");
 bullets([
   "Two rounds: a practice (formative) round whose results you can return privately, and a graded (summative) round. Open and close each round on the Peer evals tab.",
-  "The form is fixed: allocate 100 points across teammates (an equal split is legitimate; an allocation below 15 or above 40 needs a one-sentence justification, waived on teams so small the equal split itself falls outside that range), rate four behaviors 1–5 (required unless you untick “Include behavior ratings” in the Peer evals settings), and an optional confidential comment to you.",
-  "Watch completion by code number, then unlock to compute each student's team factor. The factor multiplies the team-scored part of a grade: neutral is an equal split (100 ÷ raters), a farthest-from-median rating is discarded on teams of five or more, the proportional gap is halved, and the result is clamped (default 0.80–1.10).",
-  "Factors below 0.90, or teams whose factors spread by more than 0.25, are flagged for your attention before any grade is issued. Export summary and detail CSVs, and optionally publish each student's own factor back to them privately.",
+  "The form is fixed: allocate 100 points across teammates (an equal split is the default and the neutral answer; any allocation far enough from it to actually move that teammate's factor needs a one-sentence justification — on a team of five that means anything outside 23–27), rate four behaviors 1–5 (required unless you untick “Include behavior ratings” in the Peer evals settings), and an optional confidential comment to you.",
+  "Watch completion by code number, then unlock to compute each student's team factor. The factor multiplies the team-scored part of a grade. Everything is computed in shares, where 1.00 is an even split: your share of one ballot is the points you got divided by 100 ÷ (team size - 1). The highest and the lowest share you received are dropped, the rest averaged, and the result mapped through a dead band (delta), damping (k) and asymmetric caps — f = clip(1 + k * sign(d) * max(0, |d| - delta), floor, ceiling), where d is your average share minus 1. Defaults: delta = 0.08, k = 0.5, floor 0.70, ceiling 1.05.",
+  "A teammate who does not submit is treated as having split evenly, so skipping the form neither helps them nor penalises everyone else.",
+  "Two deliberate asymmetries. Dropping both the highest and the lowest share means one hostile rater and one over-generous rater are equally powerless. And the ceiling sits closer to 1.00 than the floor does, so a group that agrees to sink one member gains far less than the target loses — the arithmetic makes that play cost the team rather than pay it.",
+  "Factors below 0.90, teams whose factors spread by more than 0.20, and members everyone rated the same and low are flagged for your attention before any grade is issued. Export summary and detail CSVs, and optionally publish each student's own factor back to them privately.",
+  "A ready-made worked example ships with the app at /peer-eval-team-factor.xlsx — the same five-member team, as a live Excel calculator rather than a picture of one. Every figure below the ballots is a formula, so students can change a number and watch the result move. There is a download link on the Peer evals tab.",
+  "The table shows a team mean. It reads exactly 1.00 for any team without real dispersion and dips below only when someone genuinely under-contributed — the dead band is what makes that true, and nothing rescales the numbers behind your back.",
 ]);
 note(
   "AI feedback is optional and clearly bounded",
@@ -398,7 +406,9 @@ const faq = [
   ["The optimizer won't finish / says the problem is large.", "Raise the time limit, reduce the number of teams, or relax some Must constraints to Important."],
   ["Nothing happens when I change something.", "TeamForge shows an inline error if a save fails (e.g. you're offline). Check your connection and try again."],
   ["The AI feedback button doesn't appear for teams.", "It only shows when the AI proxy is configured (VITE_AI_PROXY_URL) and \"Offer AI contract feedback\" is checked in the Peer evals settings. Without the proxy, contracts still work — just without AI feedback."],
-  ["A peer-eval factor looks off.", "Neutral is 100 divided by the number of teammates who actually rated the student, so partial submissions shift it. On teams of five or more the rating farthest from the median is discarded. Export the detail CSV to see every allocation."],
+  ["A peer-eval factor looks off.", "Check the Share column first: 1.00 is an even split, and anything within the dead band (±0.08 by default) maps to a factor of exactly 1.00. The highest and lowest share a student received are dropped before averaging, and the Trimmed column shows which two went. Export the detail CSV to see every allocation."],
+  ["The team mean is below 1.00. Is that a bug?", "No. The dead band and the deliberately tight ceiling mean the factors are not a fixed pot being redistributed. A team where everyone contributed evenly averages exactly 1.00; a team carrying a free rider averages less, which is the honest reading. Nothing is rescaled to hide it."],
+  ["A group could agree to give one member nothing and split the rest. What stops them?", "Less than you might fear, and the numbers say so plainly. Four members dumping on a fifth gain 0.05 each while the target loses 0.30, so the play costs the team more than it pays the plotters — and each of them must write a justification for every allocation involved. Watch for the “unanimous low” flag: independent raters sizing up a real free rider disagree with each other, while people working from an agreed number do not. Then read their justifications in the detail CSV; near-identical wording is the tell. Treat it as a prompt to talk to the team, never as proof."],
   ["A student shows as \"#7\" instead of a name.", "They haven't chosen a display name yet — it appears as soon as they log in and pick one. Nothing is blocked in the meantime: contracts and peer evaluations work, and the code index is what the factor calculation uses either way."],
   ["Two students picked confusingly similar display names.", "The app already refuses an exact duplicate within a team. For near-duplicates, ask one of them to change it (Change on their hub); tables and exports also show the code index so you can always tell them apart."],
   ["How do I get from a display name back to the real student?", "Use the code index shown beside it and your own login-codes CSV, where you kept the code-to-student mapping. That join happens in your spreadsheet — the platform never holds it."],

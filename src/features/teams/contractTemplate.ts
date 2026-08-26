@@ -1,6 +1,7 @@
 // Default team-contract sections and team-management configuration. The
 // sections seed the student-facing editor; teams may also add custom sections.
 
+import { DEFAULT_FACTOR_PARAMS } from "../../lib/teamFactor";
 import type { ContractSectionDef, PublicTeamMgmt, TeamMgmtConfig } from "../../types";
 
 export const CONTRACT_SECTIONS: ContractSectionDef[] = [
@@ -53,8 +54,10 @@ export function defaultTeamMgmtConfig(): TeamMgmtConfig {
   return {
     enabled: true,
     rosterUploadedAt: null,
-    factorFloor: 0.8,
-    factorCeiling: 1.1,
+    factorFloor: DEFAULT_FACTOR_PARAMS.factorFloor,
+    factorCeiling: DEFAULT_FACTOR_PARAMS.factorCeiling,
+    deadband: DEFAULT_FACTOR_PARAMS.deadband,
+    damping: DEFAULT_FACTOR_PARAMS.damping,
     includeBehaviors: true,
     behaviors: [...DEFAULT_BEHAVIORS],
     aiFeedbackEnabled: true,
@@ -69,6 +72,7 @@ export function publicTeamMgmt(config: TeamMgmtConfig): PublicTeamMgmt {
   return {
     enabled: config.enabled,
     includeBehaviors: config.includeBehaviors,
+    deadband: config.deadband ?? DEFAULT_FACTOR_PARAMS.deadband,
     behaviors: config.behaviors,
     aiFeedbackEnabled: config.aiFeedbackEnabled,
     contractSections: CONTRACT_SECTIONS,

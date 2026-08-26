@@ -174,9 +174,17 @@ export interface EvalRoundConfig {
 export interface TeamMgmtConfig {
   enabled: boolean;
   rosterUploadedAt: number | null;
-  /** Team-factor clamp, e.g. 0.80–1.10. */
+  /** Team-factor clamp, e.g. 0.70–1.05. Deliberately asymmetric: hard to gain,
+   * easier to lose, so a group cannot profit by scapegoating one member. */
   factorFloor: number;
   factorCeiling: number;
+  /** Dead band on the received share: |share − 1| at or below this maps to
+   * exactly 1.00, so ordinary noise and integer rounding move nobody's grade.
+   * Absent on sessions created before the dead band existed — read via
+   * `resolveFactorParams`. */
+  deadband?: number;
+  /** Damping applied to the share deviation beyond the dead band (0 < k ≤ 1). */
+  damping?: number;
   /** Part 2 of the peer eval (behavior ratings) on/off. */
   includeBehaviors: boolean;
   behaviors: string[];
@@ -195,6 +203,9 @@ export interface ContractSectionDef {
 export interface PublicTeamMgmt {
   enabled: boolean;
   includeBehaviors: boolean;
+  /** Mirrors TeamMgmtConfig.deadband so the form can show students the exact
+   * allocation range that needs no justification. */
+  deadband?: number;
   behaviors: string[];
   aiFeedbackEnabled: boolean;
   contractSections: ContractSectionDef[];
@@ -240,7 +251,8 @@ export interface PeerEvalAnswers {
   teamLabel: string;
   /** Ratee codeIndex (as string key) -> 0..100; must sum to 100. */
   points: Record<string, number>;
-  /** Required where the allocation is < 15 or > 40 (waived for tiny teams). */
+  /** Required wherever the allocation falls outside the dead band around an
+   * even split — i.e. wherever it could actually move a teammate's factor. */
   justifications: Record<string, string>;
   /** Ratee codeIndex -> one 1..5 value per behavior. */
   behaviorRatings?: Record<string, number[]>;
@@ -252,10 +264,16 @@ export interface PeerEvalAnswers {
 export interface EvalResultView {
   round: EvalRoundId;
   teamLabel: string;
+  /** Teammates who actually submitted. Imputed ballots are not counted here. */
   raterCount: number;
+  /** Points one teammate allocates to you at an even split: 100 / (n − 1). */
   neutralShare: number;
-  /** null when raterCount < 3 (anonymity guard — factor only). */
-  adjustedMeanPoints: number | null;
+  /** Trimmed mean of the shares received, where 1.00 is an even split.
+   * null when raterCount < 3 (anonymity guard — factor only). */
+  share?: number | null;
+  /** Legacy: pre-dead-band results stored the same figure in points.
+   * Retained so results published before the redesign still render. */
+  adjustedMeanPoints?: number | null;
   factor: number;
   behaviorAverages?: number[];
   note?: string;

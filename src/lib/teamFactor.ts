@@ -1,30 +1,84 @@
-// Team-factor computation for peer evaluations, mirroring the instructor's
-// published spreadsheet ("Peer evaluation and team factor.xlsx") so students
-// can verify the arithmetic:
+// Team-factor computation for peer evaluations.
 //
-//   - Each rater allocates 100 points across teammates (self excluded).
-//   - Neutral is an equal split: 100 / (number of raters who rated you).
-//   - On teams of five or more, the received rating farthest from your median
-//     received rating is discarded; if two are equally far, the more favorable
-//     one goes.
-//   - Your adjusted mean is compared with neutral; the proportional gap is
-//     halved and the result clamped to [floor, ceiling] (default 0.80–1.10).
+// Everything is expressed in *shares* rather than raw points, so an even split
+// is exactly 1.00 no matter how large the team is:
 //
-// Pure module — no Firestore, no crypto — so it is directly unit-testable.
+//   - Each rater allocates 100 points across teammates (self excluded). An even
+//     split is the default answer and the reference point.
+//   - A teammate's share of one ballot is their points divided by the even
+//     split, nu = 100 / (n - 1). Allocating evenly gives everyone a share of 1.
+//   - A member who did not submit is treated as having split evenly. Without
+//     this, missing ballots raise everyone else's bar while leaving the
+//     non-submitter's alone, so skipping the form pays.
+//   - Of the shares you received, the highest and the lowest are dropped before
+//     averaging (needs three or more real raters; imputed shares are never
+//     dropped). Trimming both ends neutralises a lone hostile rater *and* a
+//     lone generous one.
+//   - Your trimmed mean share r becomes a factor through a dead band, damping
+//     and deliberately asymmetric caps:
+//
+//         d = r - 1
+//         f = clip(1 + k * sgn(d) * max(0, |d| - delta), floor, ceiling)
+//
+//     The dead band means ordinary noise and unavoidable integer rounding move
+//     nobody's grade. The caps are asymmetric on purpose (default 0.70-1.05):
+//     gains are small and losses are not, so a group cannot profit by agreeing
+//     to sink one member - the arithmetic makes that play negative-sum.
+//
+// The team mean is therefore *not* forced to 1.00. It lands on exactly 1.00
+// whenever a team has no real dispersion, and falls below 1.00 only when
+// somebody genuinely under-contributed. That drop is reported to the
+// instructor, never silently corrected away.
+//
+// Pure module - no Firestore, no crypto - so it is directly unit-testable.
 
 import type { PeerEvalAnswers } from "../types";
 
 export interface FactorParams {
   factorFloor: number;
   factorCeiling: number;
+  /** |share − 1| at or below this maps to exactly 1.00. */
+  deadband: number;
+  /** Damping on the share deviation beyond the dead band. */
+  damping: number;
 }
 
-export const DEFAULT_FACTOR_PARAMS: FactorParams = { factorFloor: 0.8, factorCeiling: 1.1 };
+export const DEFAULT_FACTOR_PARAMS: FactorParams = {
+  factorFloor: 0.7,
+  factorCeiling: 1.05,
+  deadband: 0.08,
+  damping: 0.5,
+};
 
 /** Factors below this trigger an instructor conversation before grades. */
 export const LOW_FACTOR_FLAG = 0.9;
 /** Teams whose factors spread further than this are flagged. */
-export const SPREAD_FLAG = 0.25;
+export const SPREAD_FLAG = 0.2;
+/** Fewest real raters that still leaves a value after trimming both ends. */
+export const MIN_RATERS_TO_TRIM = 3;
+
+/**
+ * Fills in defaults for configs written before the dead band existed, so old
+ * sessions keep computing rather than producing NaN.
+ */
+export function resolveFactorParams(config: {
+  factorFloor: number;
+  factorCeiling: number;
+  deadband?: number;
+  damping?: number;
+}): FactorParams {
+  return {
+    factorFloor: config.factorFloor,
+    factorCeiling: config.factorCeiling,
+    deadband: config.deadband ?? DEFAULT_FACTOR_PARAMS.deadband,
+    damping: config.damping ?? DEFAULT_FACTOR_PARAMS.damping,
+  };
+}
+
+/** Points one rater gives each teammate at an even split. */
+export function neutralShare(teamSize: number): number {
+  return teamSize > 1 ? 100 / (teamSize - 1) : 100;
+}
 
 export interface TeamEvalInput {
   teamLabel: string;
@@ -34,23 +88,37 @@ export interface TeamEvalInput {
   submissions: PeerEvalAnswers[];
 }
 
+/** One received rating, normalised so an even split is 1.00. */
+export interface ReceivedShare {
+  share: number;
+  /** True when this stands in for a teammate who did not submit. */
+  imputed: boolean;
+}
+
 export interface MemberFactorResult {
   codeIndex: number;
-  /** Points received, one per submitting teammate (before any discard). */
+  /** Points received, one per submitting teammate (imputed ones excluded). */
   receivedPoints: number[];
-  /** Number of teammates who rated this member. */
+  /** Every share received, imputed ones included, before trimming. */
+  receivedShares: ReceivedShare[];
+  /** Number of teammates who actually submitted. Gates the anonymity guard. */
   raterCount: number;
-  /** 100 / raterCount, or null with zero raters. */
-  neutralShare: number | null;
-  /** The received rating removed by the outlier rule, if any. */
-  discardedPoint: number | null;
-  /** Mean of received points after the discard, or null with zero raters. */
-  adjustedMean: number | null;
+  /** Even-split ballots stood in for teammates who did not submit. */
+  imputedCount: number;
+  /** 100 / (teamSize − 1). */
+  neutralShare: number;
+  /** Shares removed by the trim, or null where the trim did not apply. */
+  trimmedLow: number | null;
+  trimmedHigh: number | null;
+  /** Trimmed mean of the shares received; 1.00 is an even split. */
+  share: number;
   factor: number;
   /** Per-behavior mean of ratings received (index-aligned with config.behaviors). */
   behaviorAverages: number[] | null;
-  flags: ("lowFactor" | "noRatings")[];
+  flags: MemberFlag[];
 }
+
+export type MemberFlag = "lowFactor" | "noRatings" | "noSubmission" | "unanimousLow";
 
 export interface TeamFactorResult {
   teamLabel: string;
@@ -58,73 +126,125 @@ export interface TeamFactorResult {
   /** max(factor) - min(factor) across the team. */
   spread: number;
   spreadFlagged: boolean;
-}
-
-function median(sorted: number[]): number {
-  const n = sorted.length;
-  return n % 2 === 1 ? sorted[(n - 1) / 2] : (sorted[n / 2 - 1] + sorted[n / 2]) / 2;
+  /** Mean factor across the team. Exactly 1 absent real dispersion. */
+  teamMean: number;
 }
 
 /**
- * The outlier rule: on teams of five or more members, drop the received rating
- * farthest from the median (tie -> drop the more favorable, i.e. higher, one).
- * With fewer than three received ratings the discard is skipped even on large
- * teams — dropping one of one or two ratings would let a single non-submitter
- * erase the entire signal.
+ * Drops the highest and the lowest received share. Imputed shares stand in for
+ * a silent teammate rather than expressing an opinion, so they are never the
+ * ones dropped — and were they eligible they would be chosen almost every time,
+ * since they sit at exactly 1.00 while the real shares cluster elsewhere.
+ *
+ * Needs three or more real shares: trimming both ends of three leaves the
+ * median, which is still enough to absorb one hostile or one generous rater.
+ * Below that there is nothing safe to drop.
  */
-function applyDiscard(points: number[], teamSize: number): { kept: number[]; discarded: number | null } {
-  if (teamSize < 5 || points.length < 3) return { kept: points, discarded: null };
-  const sorted = [...points].sort((a, b) => a - b);
-  const med = median(sorted);
-  let discardIdx = 0;
-  for (let i = 1; i < points.length; i++) {
-    const d = Math.abs(points[i] - med);
-    const best = Math.abs(points[discardIdx] - med);
-    if (d > best || (d === best && points[i] > points[discardIdx])) discardIdx = i;
+export function trimEnds(received: ReceivedShare[]): {
+  kept: ReceivedShare[];
+  trimmedLow: number | null;
+  trimmedHigh: number | null;
+} {
+  const real = received.filter((r) => !r.imputed);
+  if (real.length < MIN_RATERS_TO_TRIM) {
+    return { kept: received, trimmedLow: null, trimmedHigh: null };
   }
+  const sorted = [...real].sort((a, b) => a.share - b.share);
+  const low = sorted[0];
+  const high = sorted[sorted.length - 1];
   return {
-    kept: points.filter((_, i) => i !== discardIdx),
-    discarded: points[discardIdx],
+    kept: [...sorted.slice(1, -1), ...received.filter((r) => r.imputed)],
+    trimmedLow: low.share,
+    trimmedHigh: high.share,
   };
 }
 
+/**
+ * Maps a trimmed mean share onto a grade factor: dead band, then damping, then
+ * asymmetric caps. Deviations within the dead band return exactly 1.
+ */
+export function shareToFactor(share: number, params: FactorParams): number {
+  const d = share - 1;
+  const beyond = Math.max(0, Math.abs(d) - params.deadband);
+  const raw = 1 + params.damping * Math.sign(d) * beyond;
+  return Math.min(params.factorCeiling, Math.max(params.factorFloor, raw));
+}
+
+/** How tightly clustered received shares must be to read as coordinated. */
+const UNANIMITY_TOLERANCE = 0.05;
+
+/**
+ * Fires when a member is rated below the dead band by everyone *and* the
+ * ratings barely differ. Raters independently sizing up a real free rider
+ * produce scattered numbers; people who agreed on a figure beforehand produce
+ * near-identical ones. It cannot tell those two apart — both warrant the same
+ * conversation, which is why it is not called "collusion".
+ */
+function isUnanimousLow(received: ReceivedShare[], share: number, params: FactorParams): boolean {
+  const real = received.filter((r) => !r.imputed).map((r) => r.share);
+  if (real.length < 2 || share >= 1 - params.deadband) return false;
+  return Math.max(...real) - Math.min(...real) <= UNANIMITY_TOLERANCE;
+}
+
 export function computeMemberFactor(
-  receivedPoints: number[],
-  teamSize: number,
+  received: ReceivedShare[],
   params: FactorParams,
-): Omit<MemberFactorResult, "codeIndex" | "behaviorAverages"> {
-  const raterCount = receivedPoints.length;
-  if (raterCount === 0) {
+): Pick<
+  MemberFactorResult,
+  "receivedShares" | "trimmedLow" | "trimmedHigh" | "share" | "factor" | "flags"
+> {
+  if (received.length === 0) {
     return {
-      receivedPoints,
-      raterCount,
-      neutralShare: null,
-      discardedPoint: null,
-      adjustedMean: null,
+      receivedShares: received,
+      trimmedLow: null,
+      trimmedHigh: null,
+      share: 1,
       factor: 1,
       flags: ["noRatings"],
     };
   }
-  const neutralShare = 100 / raterCount;
-  const { kept, discarded } = applyDiscard(receivedPoints, teamSize);
-  const adjustedMean = kept.reduce((a, b) => a + b, 0) / kept.length;
-  const raw = 1 + (adjustedMean - neutralShare) / neutralShare / 2;
-  const factor = Math.min(params.factorCeiling, Math.max(params.factorFloor, raw));
-  const flags: MemberFactorResult["flags"] = factor < LOW_FACTOR_FLAG ? ["lowFactor"] : [];
-  return { receivedPoints, raterCount, neutralShare, discardedPoint: discarded, adjustedMean, factor, flags };
+  const { kept, trimmedLow, trimmedHigh } = trimEnds(received);
+  const share = kept.reduce((a, b) => a + b.share, 0) / kept.length;
+  const factor = shareToFactor(share, params);
+  const flags: MemberFlag[] = [];
+  if (factor < LOW_FACTOR_FLAG) flags.push("lowFactor");
+  if (isUnanimousLow(received, share, params)) flags.push("unanimousLow");
+  return { receivedShares: received, trimmedLow, trimmedHigh, share, factor, flags };
 }
 
 export function computeTeamFactors(team: TeamEvalInput, params: FactorParams): TeamFactorResult {
   const teamSize = team.memberCodeIndexes.length;
+  const neutral = neutralShare(teamSize);
+  const submitted = new Set(
+    team.submissions
+      .filter((s) => team.memberCodeIndexes.includes(s.raterCodeIndex))
+      .map((s) => s.raterCodeIndex),
+  );
+
   const members: MemberFactorResult[] = team.memberCodeIndexes.map((ratee) => {
-    const received: number[] = [];
+    const received: ReceivedShare[] = [];
+    const receivedPoints: number[] = [];
     const behaviorSums: number[] = [];
     const behaviorCounts: number[] = [];
-    for (const sub of team.submissions) {
-      if (sub.raterCodeIndex === ratee) continue;
-      const pts = sub.points[String(ratee)];
-      if (typeof pts === "number") received.push(pts);
-      const ratings = sub.behaviorRatings?.[String(ratee)];
+    let raterCount = 0;
+    let imputedCount = 0;
+
+    for (const rater of team.memberCodeIndexes) {
+      if (rater === ratee) continue;
+      const sub = team.submissions.find((s) => s.raterCodeIndex === rater);
+      const pts = sub?.points[String(ratee)];
+      if (typeof pts !== "number" || !Number.isFinite(pts)) {
+        // Silent teammate, or one whose ballot omitted this ratee: assume they
+        // would have split evenly. Every member always has n − 1 shares, which
+        // is what keeps a missing ballot from moving anyone's bar.
+        received.push({ share: 1, imputed: true });
+        imputedCount += 1;
+        continue;
+      }
+      received.push({ share: pts / neutral, imputed: false });
+      receivedPoints.push(pts);
+      raterCount += 1;
+      const ratings = sub?.behaviorRatings?.[String(ratee)];
       if (ratings) {
         ratings.forEach((r, i) => {
           behaviorSums[i] = (behaviorSums[i] ?? 0) + r;
@@ -132,15 +252,25 @@ export function computeTeamFactors(team: TeamEvalInput, params: FactorParams): T
         });
       }
     }
+
     const behaviorAverages =
       behaviorCounts.length > 0 ? behaviorSums.map((s, i) => s / behaviorCounts[i]) : null;
+    const scored = computeMemberFactor(received, params);
+    const flags = submitted.has(ratee) ? scored.flags : [...scored.flags, "noSubmission" as const];
     return {
       codeIndex: ratee,
+      receivedPoints,
+      raterCount,
+      imputedCount,
+      neutralShare: neutral,
       behaviorAverages,
-      ...computeMemberFactor(received, teamSize, params),
+      ...scored,
+      flags,
     };
   });
+
   const factors = members.map((m) => m.factor);
   const spread = factors.length ? Math.max(...factors) - Math.min(...factors) : 0;
-  return { teamLabel: team.teamLabel, members, spread, spreadFlagged: spread > SPREAD_FLAG };
+  const teamMean = factors.length ? factors.reduce((a, b) => a + b, 0) / factors.length : 1;
+  return { teamLabel: team.teamLabel, members, spread, spreadFlagged: spread > SPREAD_FLAG, teamMean };
 }

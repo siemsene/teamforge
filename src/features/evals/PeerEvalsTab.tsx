@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useSession } from "../sessions/SessionContext";
 import { saveTeamMgmt } from "../../lib/db";
 import { publicTeamMgmt } from "../teams/contractTemplate";
+import { resolveFactorParams } from "../../lib/teamFactor";
 import type { EvalRoundId, RoundStatus, TeamMgmtConfig } from "../../types";
 import { Button, Card, ErrorText, Field, NumberInput } from "../../components/ui";
 import { EvalReview } from "./EvalReview";
@@ -35,8 +36,11 @@ export function PeerEvalsTab() {
 
 function SettingsCard({ config }: { config: TeamMgmtConfig }) {
   const { sid } = useSession();
-  const [floor, setFloor] = useState(config.factorFloor);
-  const [ceiling, setCeiling] = useState(config.factorCeiling);
+  const params = resolveFactorParams(config);
+  const [floor, setFloor] = useState(params.factorFloor);
+  const [ceiling, setCeiling] = useState(params.factorCeiling);
+  const [deadband, setDeadband] = useState(params.deadband);
+  const [damping, setDamping] = useState(params.damping);
   const [includeBehaviors, setIncludeBehaviors] = useState(config.includeBehaviors);
   const [aiEnabled, setAiEnabled] = useState(config.aiFeedbackEnabled);
   const [busy, setBusy] = useState(false);
@@ -44,8 +48,10 @@ function SettingsCard({ config }: { config: TeamMgmtConfig }) {
   const [error, setError] = useState("");
 
   const dirty =
-    floor !== config.factorFloor ||
-    ceiling !== config.factorCeiling ||
+    floor !== params.factorFloor ||
+    ceiling !== params.factorCeiling ||
+    deadband !== params.deadband ||
+    damping !== params.damping ||
     includeBehaviors !== config.includeBehaviors ||
     aiEnabled !== config.aiFeedbackEnabled;
 
@@ -53,8 +59,18 @@ function SettingsCard({ config }: { config: TeamMgmtConfig }) {
     setBusy(true);
     setError("");
     try {
-      if (floor >= ceiling) {
-        setError("The floor must be below the ceiling.");
+      const problem =
+        floor >= ceiling
+          ? "The floor must be below the ceiling."
+          : floor > 1 || ceiling < 1
+            ? "The floor and ceiling must straddle 1.00."
+            : deadband < 0 || deadband >= 1
+              ? "The dead band must be at least 0 and below 1."
+              : damping <= 0 || damping > 1
+                ? "Damping must be above 0 and at most 1."
+                : "";
+      if (problem) {
+        setError(problem);
         setBusy(false);
         return;
       }
@@ -62,6 +78,8 @@ function SettingsCard({ config }: { config: TeamMgmtConfig }) {
         ...config,
         factorFloor: floor,
         factorCeiling: ceiling,
+        deadband,
+        damping,
         includeBehaviors,
         aiFeedbackEnabled: aiEnabled,
       };
@@ -78,12 +96,32 @@ function SettingsCard({ config }: { config: TeamMgmtConfig }) {
   return (
     <Card>
       <h2 className="mb-2 font-semibold">Evaluation settings</h2>
+      <p className="mb-3 text-sm text-slate-600">
+        A share of 1.00 is an even split. Deviations within the dead band are treated as noise and leave the factor
+        at exactly 1.00; beyond it the deviation is damped and then clipped. Keeping the ceiling tighter than the
+        floor is deliberate — it is what stops a group profiting by agreeing to sink one member.{" "}
+        <a
+          className="text-indigo-600 hover:underline"
+          href="/peer-eval-team-factor.xlsx"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          Download the worked example
+        </a>{" "}
+        — a live spreadsheet of the same arithmetic, ready to share with students.
+      </p>
       <div className="flex flex-wrap items-end gap-4">
         <Field label="Team-factor floor">
           <NumberInput className="w-24" min={0.5} max={1} step={0.05} value={floor} onValueChange={setFloor} />
         </Field>
         <Field label="Team-factor ceiling">
           <NumberInput className="w-24" min={1} max={1.5} step={0.05} value={ceiling} onValueChange={setCeiling} />
+        </Field>
+        <Field label="Dead band (δ)">
+          <NumberInput className="w-24" min={0} max={0.5} step={0.01} value={deadband} onValueChange={setDeadband} />
+        </Field>
+        <Field label="Damping (k)">
+          <NumberInput className="w-24" min={0.1} max={1} step={0.05} value={damping} onValueChange={setDamping} />
         </Field>
         <label className="flex items-center gap-2 text-sm">
           <input type="checkbox" checked={includeBehaviors} onChange={(e) => setIncludeBehaviors(e.target.checked)} />

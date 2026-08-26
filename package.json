@@ -11,7 +11,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "docs": "node scripts/generate-instructor-guide.mjs && node scripts/generate-student-guide.mjs",
+    "docs": "node scripts/generate-instructor-guide.mjs && node scripts/generate-student-guide.mjs && node scripts/generate-factor-workbook.mjs",
     "test:rules": "firebase emulators:exec --only firestore --project demo-teamforge \"vitest run tests/rules.test.ts tests/nicknameFlow.test.ts\""
   },
   "dependencies": {
@@ -29,6 +29,7 @@
     "@types/react": "^18.3.20",
     "@types/react-dom": "^18.3.5",
     "@vitejs/plugin-react": "^4.5.0",
+    "exceljs": "^4.4.0",
     "firebase-tools": "^15.20.0",
     "pdfkit": "^0.19.1",
     "tailwindcss": "^4.1.8",

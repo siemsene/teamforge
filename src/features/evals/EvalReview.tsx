@@ -6,7 +6,12 @@ import { importMemberKey, sealEnvelope } from "../../lib/memberKey";
 import { displayName, openDirectoryNicknames } from "../../lib/nicknames";
 import { publicTeamMgmt } from "../teams/contractTemplate";
 import { downloadFile, sessionFilename, toCsv } from "../../lib/util";
-import { LOW_FACTOR_FLAG, computeTeamFactors, type TeamFactorResult } from "../../lib/teamFactor";
+import {
+  LOW_FACTOR_FLAG,
+  computeTeamFactors,
+  resolveFactorParams,
+  type TeamFactorResult,
+} from "../../lib/teamFactor";
 import type {
   AesEnvelope,
   EvalResultView,
@@ -71,7 +76,7 @@ export function EvalReview() {
 
   const results = useMemo(() => {
     if (!decrypted) return null;
-    const params = { factorFloor: tm.factorFloor, factorCeiling: tm.factorCeiling };
+    const params = resolveFactorParams(tm);
     return decrypted.directory.teams.map((team) => {
       const submissions: PeerEvalAnswers[] = [];
       for (const m of team.members) {
@@ -84,7 +89,7 @@ export function EvalReview() {
       );
       return { team, factors };
     });
-  }, [decrypted, tm.factorFloor, tm.factorCeiling]);
+  }, [decrypted, tm.factorFloor, tm.factorCeiling, tm.deadband, tm.damping]);
 
   function exportCsv() {
     if (!decrypted || !results) return;
@@ -95,9 +100,13 @@ export function EvalReview() {
       "student",
       "codeIndex",
       "raterCount",
+      "imputedCount",
       "neutral",
-      "adjustedMean",
+      "share",
+      "trimmedLow",
+      "trimmedHigh",
       "factor",
+      "teamMean",
       "flag",
       ...behaviorCols,
     ];
@@ -109,9 +118,13 @@ export function EvalReview() {
           displayName(m.codeIndex, nicknames),
           m.codeIndex,
           m.raterCount,
-          m.neutralShare?.toFixed(2) ?? "",
-          m.adjustedMean?.toFixed(2) ?? "",
+          m.imputedCount,
+          m.neutralShare.toFixed(2),
+          m.share.toFixed(4),
+          m.trimmedLow?.toFixed(4) ?? "",
+          m.trimmedHigh?.toFixed(4) ?? "",
           m.factor.toFixed(4),
+          factors.teamMean.toFixed(4),
           [...m.flags, factors.spreadFlagged ? "teamSpread" : ""].filter(Boolean).join("|"),
           ...(tm.includeBehaviors ? (m.behaviorAverages ?? tm.behaviors.map(() => "")).map((v) => (typeof v === "number" ? v.toFixed(2) : "")) : []),
         ]);
@@ -169,8 +182,10 @@ export function EvalReview() {
             round: decrypted.round,
             teamLabel: team.label,
             raterCount: m.raterCount,
-            neutralShare: m.neutralShare ?? 0,
-            adjustedMeanPoints: m.raterCount >= 3 ? m.adjustedMean : null,
+            neutralShare: m.neutralShare,
+            // Anonymity guard: keyed to *real* raters, never the imputed
+            // ballots that stand in for teammates who stayed silent.
+            share: m.raterCount >= 3 ? m.share : null,
             factor: m.factor,
             behaviorAverages: m.raterCount >= 3 && m.behaviorAverages ? m.behaviorAverages : undefined,
             note:
@@ -292,17 +307,22 @@ function FactorTable({
     <div className="mt-4 space-y-4">
       {results.map(({ factors }) => (
         <div key={factors.teamLabel} className="rounded-md border border-slate-200">
-          <div className="flex items-center justify-between border-b border-slate-100 px-3 py-2">
+          <div className="flex items-center justify-between gap-2 border-b border-slate-100 px-3 py-2">
             <span className="font-medium">{factors.teamLabel}</span>
-            {factors.spreadFlagged && <Badge tone="amber">spread {factors.spread.toFixed(2)}</Badge>}
+            <span className="flex items-center gap-2">
+              {factors.spreadFlagged && <Badge tone="amber">spread {factors.spread.toFixed(2)}</Badge>}
+              {factors.members.some((m) => m.flags.includes("unanimousLow")) && (
+                <Badge tone="amber">unanimous low</Badge>
+              )}
+            </span>
           </div>
           <table className="w-full text-left text-sm">
             <thead className="text-xs uppercase text-slate-500">
               <tr>
                 <th className="px-3 py-1">Student</th>
                 <th className="px-3 py-1">Raters</th>
-                <th className="px-3 py-1">Neutral</th>
-                <th className="px-3 py-1">Adj. mean</th>
+                <th className="px-3 py-1">Share</th>
+                <th className="px-3 py-1">Trimmed</th>
                 <th className="px-3 py-1">Factor</th>
               </tr>
             </thead>
@@ -310,17 +330,47 @@ function FactorTable({
               {factors.members.map((m) => (
                 <tr key={m.codeIndex} className={`border-t border-slate-100 ${m.flags.includes("lowFactor") ? "bg-red-50" : ""}`}>
                   <td className="px-3 py-1">{nameByIdx.get(m.codeIndex) ?? `#${m.codeIndex}`}</td>
-                  <td className="px-3 py-1">{m.raterCount}</td>
-                  <td className="px-3 py-1">{m.neutralShare?.toFixed(1) ?? "—"}</td>
-                  <td className="px-3 py-1">{m.adjustedMean?.toFixed(1) ?? "—"}</td>
+                  <td className="px-3 py-1">
+                    {m.raterCount}
+                    {m.imputedCount > 0 && (
+                      <span className="ml-1 text-xs text-slate-500" title="Teammates who did not submit; an even split was assumed for them.">
+                        +{m.imputedCount} assumed
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-3 py-1">{m.share.toFixed(2)}</td>
+                  <td className="px-3 py-1 text-xs text-slate-500">
+                    {m.trimmedLow != null && m.trimmedHigh != null
+                      ? `${m.trimmedLow.toFixed(2)} / ${m.trimmedHigh.toFixed(2)}`
+                      : "—"}
+                  </td>
                   <td className="px-3 py-1 font-medium">
                     {m.factor.toFixed(2)}
                     {m.flags.includes("lowFactor") && <span className="ml-1 text-xs text-red-600">flag</span>}
+                    {m.flags.includes("unanimousLow") && (
+                      <span
+                        className="ml-1 text-xs text-amber-700"
+                        title="Everyone rated this member the same and low. That is what a genuine free rider looks like — and what a coordinated dump looks like. Worth a conversation either way."
+                      >
+                        unanimous
+                      </span>
+                    )}
+                    {m.flags.includes("noSubmission") && (
+                      <span className="ml-1 text-xs text-slate-500">did not submit</span>
+                    )}
                     {m.flags.includes("noRatings") && <span className="ml-1 text-xs text-slate-500">no ratings</span>}
                   </td>
                 </tr>
               ))}
             </tbody>
+            <tfoot className="text-xs text-slate-500">
+              <tr className="border-t border-slate-200">
+                <td className="px-3 py-1" colSpan={4}>
+                  Team mean — 1.00 unless someone genuinely under-contributed
+                </td>
+                <td className="px-3 py-1 font-medium">{factors.teamMean.toFixed(3)}</td>
+              </tr>
+            </tfoot>
           </table>
         </div>
       ))}

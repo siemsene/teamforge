@@ -7,6 +7,7 @@ import PDFDocument from "pdfkit";
 import { createWriteStream, mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { guardPdfText } from "./pdf-text-guard.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const outPath = join(root, "public", "student-guide.pdf");
@@ -28,6 +29,9 @@ const doc = new PDFDocument({
     Subject: "How to take your team-formation survey, and how your privacy is protected",
   },
 });
+
+// Fail loudly on any character the built-in fonts cannot encode.
+guardPdfText(doc, "student-guide.pdf");
 doc.pipe(createWriteStream(outPath));
 
 const PAGE_W = doc.page.width - doc.page.margins.left - doc.page.margins.right;
@@ -138,7 +142,10 @@ p(
 );
 bullets([
   "Team contract: any member can draft your team's norms (communication, attendance, effort, and so on). You can ask for AI feedback, revise together, then finalize and save it as a PDF. If you request AI feedback, only the contract text is sent for suggestions — don't type anyone's full name into it.",
-  "Peer evaluations: you'll allocate 100 points across your teammates (an equal split is a perfectly legitimate answer), rate a few behaviors, and optionally leave a private note to your instructor. There's a practice round first, then a graded one. Your teammates never see your answers.",
+  "Peer evaluations: you'll allocate 100 points across your teammates, rate a few behaviors, and optionally leave a private note to your instructor. There's a practice round first, then a graded one. Your teammates never see your answers.",
+  "An equal split is the default and a perfectly legitimate answer — if everyone pulled their weight, say so and you're done. Small differences are treated as noise: the form shows you the range that changes nobody's grade, and anything inside it needs no explanation. Going outside that range does change someone's grade, so it asks you for one sentence saying why.",
+  "You can check the arithmetic yourself. The peer-evaluation page links a spreadsheet that works through a five-person team step by step — it is a live calculator, so you can change the numbers and see what would happen. Nothing about how your factor is worked out is hidden from you.",
+  "Two things worth knowing. The highest and the lowest rating you receive are both thrown away before your factor is worked out, so no single teammate — generous or harsh — decides your result. And if a teammate never submits, they're counted as having split evenly, so nobody gains or loses from someone else's silence.",
 ]);
 note(
   "Your privacy still holds here",

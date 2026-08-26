@@ -1,10 +1,5 @@
 import { useMemo, useState } from "react";
-import {
-  JUSTIFICATION_HIGH,
-  JUSTIFICATION_LOW,
-  needsJustification,
-  validatePeerEval,
-} from "../../lib/evalValidation";
+import { needsJustification, neutralRange, validatePeerEval } from "../../lib/evalValidation";
 import type { EvalRoundId, Nicknames, PeerEvalAnswers, PublicTeamMgmt, RosterInfo } from "../../types";
 import { displayName } from "../../lib/nicknames";
 import { Button, ErrorText, Input, Select, TextArea } from "../../components/ui";
@@ -33,6 +28,13 @@ export function PeerEvalForm({
   const [behaviors, setBehaviors] = useState<Record<string, number[]>>({});
   const [comment, setComment] = useState("");
   const [error, setError] = useState("");
+
+  // The band around an even split within which an allocation changes nobody's
+  // factor -- and so needs no justification. Widens or narrows with team size.
+  const band = useMemo(
+    () => neutralRange(teammates.length, tm.deadband),
+    [teammates.length, tm.deadband],
+  );
 
   const total = useMemo(
     () => teammates.reduce((sum, t) => sum + (Number(points[String(t.codeIndex)]) || 0), 0),
@@ -71,6 +73,7 @@ export function PeerEvalForm({
     const problems = validatePeerEval(answers, teammates.map((t) => t.codeIndex), {
       includeBehaviors: tm.includeBehaviors,
       behaviorCount: tm.behaviors.length,
+      deadband: tm.deadband,
     });
     if (problems.length > 0) {
       setError(problems[0]);
@@ -85,14 +88,28 @@ export function PeerEvalForm({
       <section>
         <h3 className="font-semibold">Part 1 — Allocate 100 points across your teammates</h3>
         <p className="mb-2 text-sm text-slate-600">
-          Do not include yourself. An equal split is the neutral answer and a legitimate one — if everyone pulled
-          their weight, say so. A one-sentence justification is required for any allocation below {JUSTIFICATION_LOW}{" "}
-          or above {JUSTIFICATION_HIGH}.
+          Do not include yourself. An equal split is the default and the neutral answer — if everyone pulled their
+          weight, say so and you are done.{" "}
+          {teammates.length > 1 && (
+            <>
+              Anything from {band.low} to {band.high} counts as an even split and changes nobody&rsquo;s grade.
+              Going outside that range does change it, so it needs one sentence saying why.
+            </>
+          )}{" "}
+          <a
+            className="text-indigo-600 hover:underline"
+            href="/peer-eval-team-factor.xlsx"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            See exactly how your own factor is worked out
+          </a>
+          .
         </p>
         <div className="space-y-2">
           {teammates.map((t) => {
             const v = points[String(t.codeIndex)] ?? "";
-            const need = needsJustification(Number(v) || 0, teammates.length) && v !== "";
+            const need = v !== "" && needsJustification(Number(v) || 0, teammates.length, tm.deadband);
             return (
               <div key={t.codeIndex} className="rounded-md border border-slate-200 p-2">
                 <div className="flex items-center gap-3">
@@ -109,7 +126,7 @@ export function PeerEvalForm({
                 {need && (
                   <Input
                     className="mt-2"
-                    placeholder="One sentence of justification (required)"
+                    placeholder={`Outside ${band.low}-${band.high}: one sentence of justification (required)`}
                     value={justifications[String(t.codeIndex)] ?? ""}
                     onChange={(e) =>
                       setJustifications((j) => ({ ...j, [String(t.codeIndex)]: e.target.value }))

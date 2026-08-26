@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { justificationApplies, needsJustification, validatePeerEval } from "../src/lib/evalValidation";
+import {
+  justificationApplies,
+  needsJustification,
+  neutralRange,
+  validatePeerEval,
+} from "../src/lib/evalValidation";
 import type { PeerEvalAnswers } from "../src/types";
 
 const CONFIG = { includeBehaviors: false, behaviorCount: 4 };
@@ -16,8 +21,26 @@ function answers(overrides: Partial<PeerEvalAnswers>): PeerEvalAnswers {
   };
 }
 
+describe("neutralRange", () => {
+  it("scales with team size instead of using fixed point thresholds", () => {
+    expect(neutralRange(4)).toEqual({ neutral: 25, low: 23, high: 27 });
+    expect(neutralRange(3)).toEqual({ neutral: 100 / 3, low: 31, high: 36 });
+    expect(neutralRange(2)).toEqual({ neutral: 50, low: 46, high: 54 });
+  });
+
+  it("leaves the pre-filled even split inside the band despite rounding", () => {
+    // splitEvenly hands out 34/33/33 across three teammates; neither value may
+    // demand a justification for arithmetic nobody chose.
+    const { low, high } = neutralRange(3);
+    for (const v of [34, 33]) {
+      expect(v).toBeGreaterThanOrEqual(low);
+      expect(v).toBeLessThanOrEqual(high);
+    }
+  });
+});
+
 describe("validatePeerEval", () => {
-  const teammates = [2, 3, 4, 5]; // 4 raters -> neutral 25, thresholds apply
+  const teammates = [2, 3, 4, 5]; // 4 raters -> neutral 25, band 23..27
 
   it("accepts an equal split without justification", () => {
     expect(validatePeerEval(answers({ points: { "2": 25, "3": 25, "4": 25, "5": 25 } }), teammates, CONFIG)).toEqual([]);
@@ -34,19 +57,24 @@ describe("validatePeerEval", () => {
     expect(p.join(" ")).toMatch(/between 0 and 100/);
   });
 
-  it("requires a justification exactly below 15 and above 40", () => {
-    const low = validatePeerEval(answers({ points: { "2": 14, "3": 30, "4": 30, "5": 26 } }), teammates, CONFIG);
+  it("requires a justification for any allocation outside the dead band", () => {
+    // 23..27 passes silently; 22 and 28 do not.
+    const inside = validatePeerEval(
+      answers({ points: { "2": 27, "3": 25, "4": 25, "5": 23 } }),
+      teammates,
+      CONFIG,
+    );
+    expect(inside).toEqual([]);
+
+    const low = validatePeerEval(answers({ points: { "2": 22, "3": 26, "4": 26, "5": 26 } }), teammates, CONFIG);
     expect(low.join(" ")).toMatch(/justification/);
 
-    const high = validatePeerEval(answers({ points: { "2": 41, "3": 20, "4": 20, "5": 19 } }), teammates, CONFIG);
+    const high = validatePeerEval(answers({ points: { "2": 28, "3": 24, "4": 24, "5": 24 } }), teammates, CONFIG);
     expect(high.join(" ")).toMatch(/justification/);
-
-    const boundary = validatePeerEval(answers({ points: { "2": 15, "3": 40, "4": 25, "5": 20 } }), teammates, CONFIG);
-    expect(boundary).toEqual([]);
 
     const justified = validatePeerEval(
       answers({
-        points: { "2": 14, "3": 30, "4": 30, "5": 26 },
+        points: { "2": 22, "3": 26, "4": 26, "5": 26 },
         justifications: { "2": "Missed all three milestone meetings." },
       }),
       teammates,
@@ -55,20 +83,41 @@ describe("validatePeerEval", () => {
     expect(justified).toEqual([]);
   });
 
-  it("waives justification thresholds when the neutral share lies outside [15, 40]", () => {
-    // Pair: one teammate, neutral 100.
+  it("names the allowed range in the message", () => {
+    const p = validatePeerEval(answers({ points: { "2": 0, "3": 34, "4": 33, "5": 33 } }), teammates, CONFIG);
+    expect(p.join(" ")).toMatch(/outside 23-27/);
+  });
+
+  it("no longer exempts trios, the most gameable size", () => {
+    // Two members of a trio giving each other everything used to sail through
+    // with no justification at all.
+    expect(justificationApplies(2)).toBe(true);
+    const p = validatePeerEval(answers({ points: { "2": 100, "3": 0 } }), [2, 3], CONFIG);
+    expect(p.join(" ")).toMatch(/justification/);
+    expect(validatePeerEval(answers({ points: { "2": 50, "3": 50 } }), [2, 3], CONFIG)).toEqual([]);
+  });
+
+  it("waives the rule only for a pair, where 100 is the sole honest answer", () => {
     expect(justificationApplies(1)).toBe(false);
     expect(validatePeerEval(answers({ points: { "2": 100 } }), [2], CONFIG)).toEqual([]);
-    // Trio: neutral 50.
-    expect(justificationApplies(2)).toBe(false);
-    expect(validatePeerEval(answers({ points: { "2": 55, "3": 45 } }), [2, 3], CONFIG)).toEqual([]);
-    // Large team: 7 teammates, neutral ~14.3.
-    expect(justificationApplies(7)).toBe(false);
-    // Standard sizes apply.
-    expect(justificationApplies(3)).toBe(true);
-    expect(justificationApplies(4)).toBe(true);
-    expect(needsJustification(14, 4)).toBe(true);
-    expect(needsJustification(25, 4)).toBe(false);
+  });
+
+  it("keeps applying to large teams, which the old thresholds skipped", () => {
+    expect(justificationApplies(7)).toBe(true);
+    expect(needsJustification(14, 7)).toBe(false); // neutral 14.29, band 14..15
+    expect(needsJustification(20, 7)).toBe(true);
+  });
+
+  it("respects a session-configured dead band", () => {
+    // A wider band tolerates more before demanding text.
+    expect(needsJustification(20, 4, 0.08)).toBe(true);
+    expect(needsJustification(20, 4, 0.25)).toBe(false);
+    const p = validatePeerEval(
+      answers({ points: { "2": 20, "3": 27, "4": 27, "5": 26 } }),
+      teammates,
+      { ...CONFIG, deadband: 0.25 },
+    );
+    expect(p).toEqual([]);
   });
 
   it("rejects allocations to non-teammates and missing teammates", () => {

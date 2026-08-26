@@ -1,31 +1,53 @@
 // Client-side validation of a peer-evaluation form, per the published spec:
 // Part 1 must allocate exactly 100 whole points across teammates (self
-// excluded), with a one-sentence justification for any allocation below 15 or
-// above 40; Part 2 (when enabled) needs one 1-5 rating per behavior per
-// teammate. Pure module - unit-testable.
+// excluded). An even split is the default and the neutral answer; any
+// allocation far enough from it to actually move that teammate's factor needs
+// one sentence of justification. Part 2 (when enabled) needs one 1-5 rating per
+// behavior per teammate. Pure module - unit-testable.
+//
+// The justification threshold is the same dead band the factor uses, so the
+// rule reads the same way to a student either way: inside the band nothing
+// changes and nothing need be said; outside it, say why. Deriving it from the
+// dead band rather than fixing it at absolute point values also means it scales
+// with team size on its own, and that unavoidable integer rounding (34/33/33
+// across three teammates) never demands an explanation.
 
+import { DEFAULT_FACTOR_PARAMS, neutralShare } from "./teamFactor";
 import type { PeerEvalAnswers } from "../types";
-
-export const JUSTIFICATION_LOW = 15;
-export const JUSTIFICATION_HIGH = 40;
 
 export interface EvalValidationConfig {
   includeBehaviors: boolean;
   behaviorCount: number;
+  /** Defaults to the standard dead band when the session predates it. */
+  deadband?: number;
 }
 
-/** True when the justification thresholds are meaningful for this team size.
- * With one or two teammates the neutral share (100 or 50) already lies outside
- * [15, 40], so the thresholds would demand a justification for the only honest
- * answer - they are waived. */
+/** The inclusive point range that needs no justification, for one teammate. */
+export function neutralRange(
+  teammateCount: number,
+  deadband: number = DEFAULT_FACTOR_PARAMS.deadband,
+): { low: number; high: number; neutral: number } {
+  const neutral = neutralShare(teammateCount + 1);
+  return {
+    neutral,
+    low: Math.ceil(neutral * (1 - deadband) - 1e-9),
+    high: Math.floor(neutral * (1 + deadband) + 1e-9),
+  };
+}
+
+/** True when the dead band leaves any room to deviate without explaining. */
 export function justificationApplies(teammateCount: number): boolean {
-  if (teammateCount < 1) return false;
-  const neutral = 100 / teammateCount;
-  return neutral >= JUSTIFICATION_LOW && neutral <= JUSTIFICATION_HIGH;
+  return teammateCount >= 2;
 }
 
-export function needsJustification(points: number, teammateCount: number): boolean {
-  return justificationApplies(teammateCount) && (points < JUSTIFICATION_LOW || points > JUSTIFICATION_HIGH);
+export function needsJustification(
+  points: number,
+  teammateCount: number,
+  deadband: number = DEFAULT_FACTOR_PARAMS.deadband,
+): boolean {
+  if (!justificationApplies(teammateCount)) return false;
+  const { low, high } = neutralRange(teammateCount, deadband);
+  return points < low || points > high;
 }
 
 /** Returns a list of human-readable problems; empty means the form is valid. */
@@ -37,6 +59,8 @@ export function validatePeerEval(
   const problems: string[] = [];
   const n = teammateCodeIndexes.length;
   if (n === 0) return ["You have no teammates to evaluate."];
+  const deadband = config.deadband ?? DEFAULT_FACTOR_PARAMS.deadband;
+  const { low, high } = neutralRange(n, deadband);
 
   let total = 0;
   for (const idx of teammateCodeIndexes) {
@@ -48,9 +72,9 @@ export function validatePeerEval(
     if (!Number.isInteger(pts)) problems.push(`Points for teammate #${idx} must be a whole number.`);
     if (pts < 0 || pts > 100) problems.push(`Points for teammate #${idx} must be between 0 and 100.`);
     total += pts;
-    if (needsJustification(pts, n) && !answers.justifications[String(idx)]?.trim()) {
+    if (needsJustification(pts, n, deadband) && !answers.justifications[String(idx)]?.trim()) {
       problems.push(
-        `An allocation below ${JUSTIFICATION_LOW} or above ${JUSTIFICATION_HIGH} needs one sentence of justification (teammate #${idx}).`,
+        `An allocation outside ${low}-${high} needs one sentence of justification (teammate #${idx}).`,
       );
     }
   }

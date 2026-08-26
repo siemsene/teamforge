@@ -33,7 +33,11 @@ export function FormativeResults({ memberKey, envelope }: { memberKey: CryptoKey
     );
   if (!view) return <Spinner label="Loading your results…" />;
 
-  const detailed = view.adjustedMeanPoints != null;
+  // `share` is the current field; `adjustedMeanPoints` (in points) is what
+  // results published before the dead-band redesign carry.
+  const share = view.share ?? null;
+  const legacyPoints = view.adjustedMeanPoints ?? null;
+  const detailed = share != null || legacyPoints != null;
   return (
     <Card className="bg-emerald-50">
       <h2 className="mb-1 font-semibold">Your results — {ROUND_LABEL[view.round] ?? view.round}</h2>
@@ -44,8 +48,17 @@ export function FormativeResults({ memberKey, envelope }: { memberKey: CryptoKey
       {detailed ? (
         <ul className="mt-2 text-sm text-slate-700">
           <li>
-            Neutral (equal split) was {view.neutralShare.toFixed(1)} points; your adjusted average received share was{" "}
-            {view.adjustedMeanPoints!.toFixed(1)}.
+            {share != null ? (
+              <>
+                An even split is 1.00. After dropping the highest and lowest rating you received, your average share
+                was {share.toFixed(2)} — that is {view.neutralShare.toFixed(1)} points per teammate at an even split.
+              </>
+            ) : (
+              <>
+                Neutral (equal split) was {view.neutralShare.toFixed(1)} points; your adjusted average received share
+                was {legacyPoints!.toFixed(1)}.
+              </>
+            )}
           </li>
           {view.behaviorAverages && view.behaviorAverages.length > 0 && (
             <li>
