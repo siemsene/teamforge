@@ -104,6 +104,10 @@ AI feedback runs through a small **Cloudflare Worker** in [`worker/`](worker/) t
 - set `VITE_AI_PROXY_URL` in `.env.local` to the worker URL, and
 - add that origin to the `connect-src` directive of the Content-Security-Policy in `firebase.json` (the default already allows `https://*.workers.dev`; change it if you use a custom domain), then rebuild and redeploy.
 
+### A note on the Content-Security-Policy
+
+`script-src` in [`firebase.json`](firebase.json) carries `'wasm-unsafe-eval'` alongside `'self'`. **Do not remove it**: CSP counts compiling WebAssembly as code generation, so without it the highs-js solver fails at `WebAssembly.instantiate` and team allocation cannot run at all on the deployed site. `'wasm-unsafe-eval'` permits WebAssembly and nothing else — `eval()` and `new Function()` still throw, verified in headless Chrome against the exact policy string. `'unsafe-eval'` would fix the same symptom by re-enabling JavaScript code generation everywhere; don't reach for it. [`tests/csp.test.ts`](tests/csp.test.ts) guards both halves of this. It requires Chrome 97+, Firefox 102+, or Safari 16.4+.
+
 When `VITE_AI_PROXY_URL` is unset the AI-feedback button simply doesn't appear and everything else in team management still works. AI feedback is the one point where contract text (never names) leaves the app's end-to-end encryption; it is disclosed to students in the privacy note and gated behind an explicit consent dialog.
 
 ## License
