@@ -97,6 +97,8 @@ After allocation, an instructor may enable a **Team management** phase on the sa
 
   The dead band means ordinary noise and integer rounding move nobody's grade. Trimming both ends neutralises a lone hostile rater *and* a lone generous one. The tight ceiling against the deep floor is what makes scapegoating negative-sum: four members dumping on a fifth gain 0.05 each while the target loses 0.30. The team mean is therefore not pinned to 1.00 — it lands there exactly when a team has no real dispersion, and falls below only when someone genuinely under-contributed. That is reported to the instructor, never silently corrected.
 
+- **Emails.** Editable, copyable drafts for each phase — the survey (Overview tab), teams and the contract (Teams tab), and one per peer-evaluation round (Peer evals tab). All share the `<STUDENT NAME>` / `<LOGIN CODE>` / `<DEADLINE>` placeholders so a single mail merge works throughout, and the graded-round draft is generated from the session's live settings, so the caps it quotes are the ones actually applied. Drafts are owner-only — `publicTeamMgmt` mirrors just round status, note and published-ness.
+
 ### AI contract feedback (optional)
 
 AI feedback runs through a small **Cloudflare Worker** in [`worker/`](worker/) that holds the Anthropic API key as a secret — necessary because the app itself has no server. Deploy it (see [`worker/README.md`](worker/README.md)), then:

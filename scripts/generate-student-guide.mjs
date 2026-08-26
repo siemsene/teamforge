@@ -8,10 +8,12 @@ import { createWriteStream, mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { guardPdfText } from "./pdf-text-guard.mjs";
+import { pdfInfo } from "./deterministic.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-const outPath = join(root, "public", "student-guide.pdf");
-mkdirSync(join(root, "public"), { recursive: true });
+const outDir = process.env.DOCS_OUT_DIR ?? join(root, "public");
+const outPath = join(outDir, "student-guide.pdf");
+mkdirSync(outDir, { recursive: true });
 
 const INK = "#0f172a";
 const SUB = "#475569";
@@ -23,11 +25,11 @@ const BOXBORDER = "#c7d2fe";
 const doc = new PDFDocument({
   size: "A4",
   margins: { top: 54, bottom: 48, left: 60, right: 60 },
-  info: {
+  info: pdfInfo({
     Title: "TeamForge — Student Quick Guide",
     Author: "TeamForge",
     Subject: "How to take your team-formation survey, and how your privacy is protected",
-  },
+  }),
 });
 
 // Fail loudly on any character the built-in fonts cannot encode.

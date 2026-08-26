@@ -10,10 +10,12 @@ import { createWriteStream, mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { guardPdfText } from "./pdf-text-guard.mjs";
+import { pdfInfo } from "./deterministic.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-const outPath = join(root, "public", "instructor-guide.pdf");
-mkdirSync(join(root, "public"), { recursive: true });
+const outDir = process.env.DOCS_OUT_DIR ?? join(root, "public");
+const outPath = join(outDir, "instructor-guide.pdf");
+mkdirSync(outDir, { recursive: true });
 
 const INK = "#0f172a";
 const SUB = "#475569";
@@ -26,11 +28,11 @@ const doc = new PDFDocument({
   size: "A4",
   margins: { top: 64, bottom: 60, left: 64, right: 64 },
   bufferPages: true,
-  info: {
+  info: pdfInfo({
     Title: "TeamForge — Instructor Guide",
     Author: "TeamForge",
     Subject: "How to run a privacy-preserving team allocation, end to end",
-  },
+  }),
 });
 
 // Fail loudly on any character the built-in fonts cannot encode.
@@ -362,6 +364,7 @@ bullets([
   "You do not upload names. If your working sheet already has a name column, leave it — TeamForge shows those names in the on-screen preview so you can confirm you picked the right file, but they never leave your browser.",
   "Check the preview before provisioning. It reports how many assignments came from the allocation versus your file, and warns if anyone in the allocation is missing from the CSV — which is what a truncated or stale file looks like.",
   "Your browser then encrypts each student's team membership under their own key, so the platform never stores team membership in plaintext either. Students log in with the same code they used for the survey.",
+  "Once teams are provisioned, the Teams tab offers a ready-made email announcing the team and the contract, and the Peer evals tab offers one per round. Each is editable, saved with the session, and uses the same <STUDENT NAME> / <LOGIN CODE> / <DEADLINE> placeholders as the survey email, so one mail merge covers the whole term. The graded-round draft quotes this session's own factor caps and links the worked-example workbook, so what students are told matches what the app computes.",
 ]);
 
 h3("Display names (students choose their own)");

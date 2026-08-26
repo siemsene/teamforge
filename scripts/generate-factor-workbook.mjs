@@ -11,10 +11,13 @@
 // the three cannot drift apart.
 
 import ExcelJS from "exceljs";
+import { BUILD_DATE, normalizeXlsx } from "./deterministic.mjs";
+import { writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
-const outPath = join(dirname(fileURLToPath(import.meta.url)), "..", "public", "peer-eval-team-factor.xlsx");
+const outDir = process.env.DOCS_OUT_DIR ?? join(dirname(fileURLToPath(import.meta.url)), "..", "public");
+const outPath = join(outDir, "peer-eval-team-factor.xlsx");
 
 const NAMES = ["Ana", "Ben", "Cara", "Dev", "Eli"];
 
@@ -45,7 +48,8 @@ const BLOCKED_FILL = "FFE2E8F0";
 
 const wb = new ExcelJS.Workbook();
 wb.creator = "TeamForge";
-wb.created = new Date(0); // deterministic output
+wb.created = BUILD_DATE;
+wb.modified = BUILD_DATE;
 
 const ws = wb.addWorksheet("Team factor", {
   views: [{ showGridLines: false }],
@@ -390,5 +394,7 @@ RULES.forEach(([heading, body], i) => {
   ws2.getRow(row).height = Math.max(30, Math.ceil(body.length / 105) * 15 + 15);
 });
 
-await wb.xlsx.writeFile(outPath);
+// exceljs stamps every zip entry with the current time and offers no hook,
+// so the workbook is normalised after it is built rather than while.
+writeFileSync(outPath, await normalizeXlsx(await wb.xlsx.writeBuffer()));
 console.log(`Wrote ${outPath}`);

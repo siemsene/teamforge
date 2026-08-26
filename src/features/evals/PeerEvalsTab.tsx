@@ -6,6 +6,10 @@ import { resolveFactorParams } from "../../lib/teamFactor";
 import type { EvalRoundId, RoundStatus, TeamMgmtConfig } from "../../types";
 import { Button, Card, ErrorText, Field, NumberInput } from "../../components/ui";
 import { EvalReview } from "./EvalReview";
+import { EmailTemplateCard } from "../../components/EmailTemplateCard";
+import { emailContext, peerEvalEmail } from "../teams/emailTemplates";
+import { CONTRACT_SECTIONS } from "../teams/contractTemplate";
+import { surveyUrl } from "../../lib/util";
 
 const ROUND_LABEL: Record<EvalRoundId, string> = { formative: "Practice (formative)", summative: "Graded (summative)" };
 const STATUS_ORDER: RoundStatus[] = ["pending", "open", "closed"];
@@ -144,7 +148,14 @@ function SettingsCard({ config }: { config: TeamMgmtConfig }) {
 }
 
 function RoundsCard({ config }: { config: TeamMgmtConfig }) {
-  const { sid } = useSession();
+  const { sid, session } = useSession();
+  const params = resolveFactorParams(config);
+  const ctx = emailContext(
+    session.title,
+    surveyUrl(sid),
+    { ...params, includeBehaviors: config.includeBehaviors, aiFeedbackEnabled: config.aiFeedbackEnabled },
+    CONTRACT_SECTIONS.map((c) => c.title),
+  );
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
 
@@ -172,6 +183,16 @@ function RoundsCard({ config }: { config: TeamMgmtConfig }) {
     } finally {
       setBusy("");
     }
+  }
+
+  async function setEmail(round: EvalRoundId, emailTemplate: string) {
+    const next: TeamMgmtConfig = {
+      ...config,
+      rounds: { ...config.rounds, [round]: { ...config.rounds[round], emailTemplate } },
+    };
+    // publicTeamMgmt mirrors only status/note/resultsPublished, so the draft
+    // stays owner-only.
+    await saveTeamMgmt(sid, next, publicTeamMgmt(next));
   }
 
   async function setNote(round: EvalRoundId, note: string) {
@@ -213,6 +234,25 @@ function RoundsCard({ config }: { config: TeamMgmtConfig }) {
                 ))}
               </div>
               <NoteEditor initial={cfg.note ?? ""} onSave={(n) => setNote(round, n)} />
+              <details className="mt-3">
+                <summary className="cursor-pointer text-sm text-indigo-700">
+                  Email to send students for this round
+                </summary>
+                <div className="mt-2">
+                  <EmailTemplateCard
+                    key={`${round}:${cfg.emailTemplate === undefined}`}
+                    title={`${ROUND_LABEL[round]} — email to students`}
+                    intro={
+                      round === "formative"
+                        ? "Announces the practice round and explains the form before it counts for anything."
+                        : "Announces the graded round and states plainly how the factor is worked out, using this session's settings."
+                    }
+                    saved={cfg.emailTemplate}
+                    fallback={peerEvalEmail(round, ctx)}
+                    onSave={(text) => setEmail(round, text)}
+                  />
+                </div>
+              </details>
             </div>
           );
         })}

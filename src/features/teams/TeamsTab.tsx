@@ -9,6 +9,12 @@ import { Badge, Button, Card, ErrorText, Spinner } from "../../components/ui";
 import { UnlockPanel } from "../sessions/UnlockPanel";
 import { RosterImport } from "./RosterImport";
 import { ContractPrint } from "./ContractPrint";
+import { EmailTemplateCard } from "../../components/EmailTemplateCard";
+import { contractEmail, emailContext } from "./emailTemplates";
+import { CONTRACT_SECTIONS, publicTeamMgmt } from "./contractTemplate";
+import { resolveFactorParams } from "../../lib/teamFactor";
+import { saveTeamMgmt } from "../../lib/db";
+import { surveyUrl } from "../../lib/util";
 
 const STATUS_TONE = { empty: "gray", draft: "amber", final: "green" } as const;
 const STATUS_LABEL = { empty: "Not started", draft: "In progress", final: "Finalized" } as const;
@@ -48,8 +54,34 @@ export function TeamsTab() {
           </div>
         </div>
       </Card>
+      <ContractEmailCard />
       <ContractReview teams={teams} sid={sid} sessionTitle={session.title} publicKey={session.wrappedKeys} />
     </div>
+  );
+}
+
+function ContractEmailCard() {
+  const { sid, session } = useSession();
+  const tm = session.teamMgmt;
+  if (!tm) return null;
+  const params = resolveFactorParams(tm);
+  const ctx = emailContext(
+    session.title,
+    surveyUrl(sid),
+    { ...params, includeBehaviors: tm.includeBehaviors, aiFeedbackEnabled: tm.aiFeedbackEnabled },
+    CONTRACT_SECTIONS.map((c) => c.title),
+  );
+  return (
+    <EmailTemplateCard
+      title="Email to students — teams and the contract"
+      intro="Tells students their team is set, how to log in, that they pick their own display name, and what the contract has to cover."
+      saved={tm.contractEmail}
+      fallback={contractEmail(ctx)}
+      onSave={async (contractEmailText) => {
+        const next = { ...tm, contractEmail: contractEmailText };
+        await saveTeamMgmt(sid, next, publicTeamMgmt(next));
+      }}
+    />
   );
 }
 

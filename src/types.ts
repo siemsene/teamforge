@@ -163,6 +163,9 @@ export type RoundStatus = "pending" | "open" | "closed";
 
 export interface EvalRoundConfig {
   status: RoundStatus;
+  /** Instructor's email draft for this round. Owner-only — never mirrored to
+   * PublicTeamMgmt, which carries only status, note and resultsPublished. */
+  emailTemplate?: string;
   /** Free-text shown to students, e.g. "Opens Mon Oct 6, closes Fri Oct 10". */
   note?: string;
   openedAt?: number;
@@ -185,6 +188,8 @@ export interface TeamMgmtConfig {
   deadband?: number;
   /** Damping applied to the share deviation beyond the dead band (0 < k ≤ 1). */
   damping?: number;
+  /** Instructor's email draft announcing teams and the contract. Owner-only. */
+  contractEmail?: string;
   /** Part 2 of the peer eval (behavior ratings) on/off. */
   includeBehaviors: boolean;
   behaviors: string[];
