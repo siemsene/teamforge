@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useSession } from "../sessions/SessionContext";
 import { saveTeamMgmt } from "../../lib/db";
 import { publicTeamMgmt } from "../teams/contractTemplate";
@@ -9,11 +9,11 @@ import {
   shareToFactor,
 } from "../../lib/teamFactor";
 import { neutralRange } from "../../lib/evalValidation";
-import type { EvalRoundId, RoundStatus, TeamMgmtConfig } from "../../types";
+import type { EvalRoundConfig, EvalRoundId, RoundStatus, TeamMgmtConfig } from "../../types";
 import { Badge, Button, Card, ErrorText, Field, NumberInput } from "../../components/ui";
 import { EvalReview } from "./EvalReview";
 import { EmailTemplateCard } from "../../components/EmailTemplateCard";
-import { emailContext, peerEvalEmail } from "../teams/emailTemplates";
+import { emailContext, peerEvalEmail, type EmailContext } from "../teams/emailTemplates";
 import { CONTRACT_SECTIONS } from "../teams/contractTemplate";
 import { surveyUrl } from "../../lib/util";
 
@@ -336,55 +336,116 @@ function RoundsCard({ config }: { config: TeamMgmtConfig }) {
         its results returned privately; the graded round counts.
       </p>
       <div className="space-y-4">
-        {(["formative", "summative"] as EvalRoundId[]).map((round) => {
-          const cfg = config.rounds[round];
-          return (
-            <div key={round} className="rounded-md border border-slate-200 p-3">
-              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                <span className="font-medium">{ROUND_LABEL[round]}</span>
-                <span className="flex items-center gap-1.5">
-                  <Badge tone={STATUS_TONE[cfg.status]}>{STATUS_LABEL[cfg.status]}</Badge>
-                  {cfg.resultsPublishedAt != null && <Badge tone="green">Results published</Badge>}
-                </span>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {STATUS_ORDER.map((s) => (
-                  <Button
-                    key={s}
-                    variant={cfg.status === s ? "primary" : "secondary"}
-                    disabled={busy !== "" || cfg.status === s}
-                    onClick={() => setStatus(round, s)}
-                  >
-                    {STATUS_LABEL[s]}
-                  </Button>
-                ))}
-              </div>
-              <NoteEditor initial={cfg.note ?? ""} onSave={(n) => setNote(round, n)} />
-              <details className="mt-3">
-                <summary className="cursor-pointer text-sm text-indigo-700">
-                  Email to send students for this round
-                </summary>
-                <div className="mt-2">
-                  <EmailTemplateCard
-                    key={`${round}:${cfg.emailTemplate === undefined}`}
-                    title={`${ROUND_LABEL[round]} — email to students`}
-                    intro={
-                      round === "formative"
-                        ? "Announces the practice round and explains the form before it counts for anything."
-                        : "Announces the graded round and states plainly how the factor is worked out, using this session's settings."
-                    }
-                    saved={cfg.emailTemplate}
-                    fallback={peerEvalEmail(round, ctx)}
-                    onSave={(text) => setEmail(round, text)}
-                  />
-                </div>
-              </details>
-            </div>
-          );
-        })}
+        {(["formative", "summative"] as EvalRoundId[]).map((round) => (
+          <RoundBlock
+            key={round}
+            round={round}
+            cfg={config.rounds[round]}
+            ctx={ctx}
+            busy={busy}
+            onStatus={setStatus}
+            onNote={setNote}
+            onEmail={setEmail}
+          />
+        ))}
       </div>
       <ErrorText>{error}</ErrorText>
     </Card>
+  );
+}
+
+/**
+ * One evaluation round: its status, the note students see, and the email that
+ * announces it.
+ *
+ * The email used to sit behind a bare <details> whose summary read as a
+ * footnote link, and it was the only one of the app's three drafts not visible
+ * on arrival — the survey invite is inline on the Overview tab and the contract
+ * email is a card of its own on Teams. People concluded there wasn't one. So it
+ * is a labelled control now, and it opens itself the moment a round does, which
+ * is exactly when the email is needed.
+ */
+function RoundBlock({
+  round,
+  cfg,
+  ctx,
+  busy,
+  onStatus,
+  onNote,
+  onEmail,
+}: {
+  round: EvalRoundId;
+  cfg: EvalRoundConfig;
+  ctx: EmailContext;
+  busy: string;
+  onStatus: (round: EvalRoundId, status: RoundStatus) => void;
+  onNote: (round: EvalRoundId, note: string) => void;
+  onEmail: (round: EvalRoundId, text: string) => Promise<void>;
+}) {
+  const [showEmail, setShowEmail] = useState(cfg.status === "open");
+  const emailId = useId();
+
+  // Reveal it when the round *becomes* open, not merely whenever it is open:
+  // an instructor who deliberately collapsed it should not have it spring back.
+  const prevStatus = useRef(cfg.status);
+  useEffect(() => {
+    if (prevStatus.current !== "open" && cfg.status === "open") setShowEmail(true);
+    prevStatus.current = cfg.status;
+  }, [cfg.status]);
+
+  return (
+    <div className="rounded-md border border-slate-200 p-3">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <span className="font-medium">{ROUND_LABEL[round]}</span>
+        <span className="flex items-center gap-1.5">
+          <Badge tone={STATUS_TONE[cfg.status]}>{STATUS_LABEL[cfg.status]}</Badge>
+          {cfg.resultsPublishedAt != null && <Badge tone="green">Results published</Badge>}
+        </span>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {STATUS_ORDER.map((s) => (
+          <Button
+            key={s}
+            variant={cfg.status === s ? "primary" : "secondary"}
+            disabled={busy !== "" || cfg.status === s}
+            onClick={() => onStatus(round, s)}
+          >
+            {STATUS_LABEL[s]}
+          </Button>
+        ))}
+      </div>
+      <NoteEditor initial={cfg.note ?? ""} onSave={(n) => onNote(round, n)} />
+
+      <div className="mt-3">
+        <Button
+          variant="secondary"
+          aria-expanded={showEmail}
+          aria-controls={emailId}
+          onClick={() => setShowEmail((v) => !v)}
+        >
+          {showEmail ? "Hide" : "Show"} the email announcing this round
+        </Button>
+        {!showEmail && cfg.emailTemplate != null && (
+          <span className="ml-2 text-xs text-slate-500">edited and saved</span>
+        )}
+        {showEmail && (
+          <div id={emailId} className="mt-2">
+            <EmailTemplateCard
+              key={`${round}:${cfg.emailTemplate === undefined}`}
+              title={`${ROUND_LABEL[round]} — email to students`}
+              intro={
+                round === "formative"
+                  ? "Announces the practice round and explains the form before it counts for anything."
+                  : "Announces the graded round and states plainly how the factor is worked out, using this session's settings."
+              }
+              saved={cfg.emailTemplate}
+              fallback={peerEvalEmail(round, ctx)}
+              onSave={(text) => onEmail(round, text)}
+            />
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 
