@@ -18,13 +18,20 @@ import { describe, expect, it } from "vitest";
  * solver, but it re-enables JavaScript code generation across the whole app —
  * which is why the assertion below rejects it.
  */
-const CSP: string = (() => {
-  const cfg = JSON.parse(readFileSync(join(__dirname, "..", "firebase.json"), "utf8"));
-  const header = cfg.hosting.headers
-    .flatMap((h: { headers: { key: string; value: string }[] }) => h.headers)
-    .find((h: { key: string }) => h.key === "Content-Security-Policy");
-  return header.value;
-})();
+interface HeaderRule {
+  source: string;
+  headers: { key: string; value: string }[];
+}
+
+const RULES: HeaderRule[] = JSON.parse(
+  readFileSync(join(__dirname, "..", "firebase.json"), "utf8"),
+).hosting.headers;
+
+function headerFor(source: string, key: string): string | undefined {
+  return RULES.find((r) => r.source === source)?.headers.find((h) => h.key === key)?.value;
+}
+
+const CSP = headerFor("**", "Content-Security-Policy") ?? "";
 
 function directive(name: string): string[] {
   const found = CSP.split(";")
@@ -65,5 +72,44 @@ describe("deployed Content-Security-Policy", () => {
     expect(connect).toContain("'self'"); // Firestore long-poll fallback, wasm, assets
     expect(connect).toContain("https://*.googleapis.com"); // Firebase
     expect(connect).toContain("https://*.workers.dev"); // AI contract-feedback proxy
+  });
+});
+
+/**
+ * Caching, which is what makes a deploy actually reach anyone.
+ *
+ * Firebase Hosting defaults every file to `Cache-Control: max-age=3600`. A
+ * browser holding a cached index.html replays the response headers it was
+ * stored with — so after the CSP above was corrected, reloading the site still
+ * produced the *old* policy's error for up to an hour, because the cached HTML
+ * carried the old header with it. Security headers are only as current as the
+ * document they arrived on.
+ */
+describe("cache policy", () => {
+  it("revalidates the app shell on every load, so deploys land immediately", () => {
+    expect(headerFor("**", "Cache-Control")).toBe("no-cache");
+  });
+
+  it("caches content-hashed assets indefinitely", () => {
+    // Vite fingerprints everything under /assets/, so a changed file gets a new
+    // URL and a stale one can never be served by mistake.
+    expect(headerFor("/assets/**", "Cache-Control")).toBe("public, max-age=31536000, immutable");
+  });
+
+  it("keeps the immutable rule scoped to hashed assets only", () => {
+    // Anything with a stable name — the guides, the workbook, index.html — must
+    // fall under the revalidating default, or an update would never reach anyone.
+    const immutable = RULES.filter((r) =>
+      r.headers.some((h) => h.key === "Cache-Control" && h.value.includes("immutable")),
+    );
+    expect(immutable.map((r) => r.source)).toEqual(["/assets/**"]);
+  });
+
+  it("still applies the security headers to everything", () => {
+    // The catch-all rule must stay first and stay broad; the assets rule only
+    // overrides Cache-Control.
+    expect(RULES[0].source).toBe("**");
+    expect(RULES[0].headers.map((h) => h.key)).toContain("Content-Security-Policy");
+    expect(RULES[1].headers.map((h) => h.key)).toEqual(["Cache-Control"]);
   });
 });
