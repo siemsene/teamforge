@@ -5,7 +5,7 @@ import { publicTeamMgmt } from "../teams/contractTemplate";
 import { resolveFactorParams, shareToFactor } from "../../lib/teamFactor";
 import { neutralRange } from "../../lib/evalValidation";
 import type { EvalRoundId, RoundStatus, TeamMgmtConfig } from "../../types";
-import { Button, Card, ErrorText, Field, NumberInput } from "../../components/ui";
+import { Badge, Button, Card, ErrorText, Field, NumberInput } from "../../components/ui";
 import { EvalReview } from "./EvalReview";
 import { EmailTemplateCard } from "../../components/EmailTemplateCard";
 import { emailContext, peerEvalEmail } from "../teams/emailTemplates";
@@ -14,6 +14,16 @@ import { surveyUrl } from "../../lib/util";
 
 const ROUND_LABEL: Record<EvalRoundId, string> = { formative: "Practice (formative)", summative: "Graded (summative)" };
 const STATUS_ORDER: RoundStatus[] = ["pending", "open", "closed"];
+const STATUS_LABEL: Record<RoundStatus, string> = {
+  pending: "Not open",
+  open: "Open",
+  closed: "Closed",
+};
+const STATUS_TONE: Record<RoundStatus, "gray" | "green" | "amber"> = {
+  pending: "gray",
+  open: "green",
+  closed: "amber",
+};
 
 export function PeerEvalsTab() {
   const { session } = useSession();
@@ -270,9 +280,12 @@ function RoundsCard({ config }: { config: TeamMgmtConfig }) {
           const cfg = config.rounds[round];
           return (
             <div key={round} className="rounded-md border border-slate-200 p-3">
-              <div className="mb-2 flex items-center justify-between">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                 <span className="font-medium">{ROUND_LABEL[round]}</span>
-                <span className="text-xs uppercase text-slate-500">{cfg.status}</span>
+                <span className="flex items-center gap-1.5">
+                  <Badge tone={STATUS_TONE[cfg.status]}>{STATUS_LABEL[cfg.status]}</Badge>
+                  {cfg.resultsPublishedAt != null && <Badge tone="green">Results published</Badge>}
+                </span>
               </div>
               <div className="flex flex-wrap gap-2">
                 {STATUS_ORDER.map((s) => (
@@ -282,7 +295,7 @@ function RoundsCard({ config }: { config: TeamMgmtConfig }) {
                     disabled={busy !== "" || cfg.status === s}
                     onClick={() => setStatus(round, s)}
                   >
-                    {s === "pending" ? "Not open" : s === "open" ? "Open" : "Close"}
+                    {STATUS_LABEL[s]}
                   </Button>
                 ))}
               </div>
@@ -317,17 +330,23 @@ function RoundsCard({ config }: { config: TeamMgmtConfig }) {
 
 function NoteEditor({ initial, onSave }: { initial: string; onSave: (n: string) => void }) {
   const [note, setNote] = useState(initial);
+  const dirty = note !== initial;
   return (
-    <div className="mt-2 flex items-center gap-2">
-      <input
-        className="flex-1 rounded-md border border-slate-300 px-3 py-1.5 text-sm"
-        placeholder="Note shown to students, e.g. deadline"
-        value={note}
-        onChange={(e) => setNote(e.target.value)}
-      />
-      <Button variant="ghost" onClick={() => onSave(note)} disabled={note === initial}>
-        Save note
-      </Button>
+    <div className="mt-3">
+      <label className="mb-1 block text-xs font-medium text-slate-600">
+        Note shown to students on this round
+      </label>
+      <div className="flex items-center gap-2">
+        <input
+          className="min-w-0 flex-1 rounded-md border border-slate-300 px-3 py-1.5 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+          placeholder="e.g. Closes Friday 5pm"
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+        />
+        <Button variant="secondary" onClick={() => onSave(note)} disabled={!dirty}>
+          {dirty ? "Save note" : "Saved"}
+        </Button>
+      </div>
     </div>
   );
 }

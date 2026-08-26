@@ -206,9 +206,22 @@ export function EvalReview() {
         </div>
       </div>
 
-      <p className="mb-2 text-sm text-slate-600">
-        {submitted} of {total} students submitted this round. Tiles are anonymous until you unlock.
-      </p>
+      <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2 text-sm">
+        <p className="text-slate-600">
+          <strong className="text-slate-800">
+            {submitted} of {total}
+          </strong>{" "}
+          students submitted this round.
+        </p>
+        <span className="flex items-center gap-3 text-xs text-slate-500">
+          <span className="flex items-center gap-1">
+            <span className="inline-block h-3 w-3 rounded bg-green-100" /> submitted
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="inline-block h-3 w-3 rounded bg-slate-100" /> not yet
+          </span>
+        </span>
+      </div>
       <div className="mb-4 grid grid-cols-5 gap-2 sm:grid-cols-8 md:grid-cols-10">
         {students.map((s) => (
           <div
@@ -299,59 +312,77 @@ function FactorTable({
               )}
             </span>
           </div>
-          <table className="w-full text-left text-sm">
-            <thead className="text-xs uppercase text-slate-500">
+          {/* Each team is its own table, so without fixed widths the columns
+              drift from one team to the next and the page reads as ragged.
+              A shared colgroup lines them all up. */}
+          <table className="w-full table-fixed text-sm">
+            <colgroup>
+              <col className="w-[27%]" />
+              <col className="w-[11%]" />
+              <col className="w-[11%]" />
+              <col className="w-[15%]" />
+              <col className="w-[11%]" />
+              <col className="w-[25%]" />
+            </colgroup>
+            <thead className="text-xs uppercase tracking-wide text-slate-500">
               <tr>
-                <th className="px-3 py-1">Student</th>
-                <th className="px-3 py-1">Raters</th>
-                <th className="px-3 py-1">Share</th>
-                <th className="px-3 py-1">Trimmed</th>
-                <th className="px-3 py-1">Factor</th>
+                <th className="px-3 py-1.5 text-left font-medium">Student</th>
+                <th className="px-3 py-1.5 text-right font-medium">Raters</th>
+                <th className="px-3 py-1.5 text-right font-medium">Share</th>
+                <th className="px-3 py-1.5 text-right font-medium">Dropped</th>
+                <th className="px-3 py-1.5 text-right font-medium">Factor</th>
+                <th className="px-3 py-1.5 text-left font-medium">Notes</th>
               </tr>
             </thead>
             <tbody>
               {factors.members.map((m) => (
-                <tr key={m.codeIndex} className={`border-t border-slate-100 ${m.flags.includes("lowFactor") ? "bg-red-50" : ""}`}>
-                  <td className="px-3 py-1">{nameByIdx.get(m.codeIndex) ?? `#${m.codeIndex}`}</td>
-                  <td className="px-3 py-1">
+                <tr
+                  key={m.codeIndex}
+                  className={`border-t border-slate-100 ${m.flags.includes("lowFactor") ? "bg-red-50" : ""}`}
+                >
+                  <td className="break-words px-3 py-1.5">{nameByIdx.get(m.codeIndex) ?? `#${m.codeIndex}`}</td>
+                  <td className="px-3 py-1.5 text-right tabular-nums">
                     {m.raterCount}
                     {m.imputedCount > 0 && (
-                      <span className="ml-1 text-xs text-slate-500" title="Teammates who did not submit; an even split was assumed for them.">
-                        +{m.imputedCount} assumed
+                      <span
+                        className="ml-1 text-xs text-slate-400"
+                        title={`${m.imputedCount} teammate(s) did not submit; an even split was assumed for them.`}
+                      >
+                        +{m.imputedCount}
                       </span>
                     )}
                   </td>
-                  <td className="px-3 py-1">{m.share.toFixed(2)}</td>
-                  <td className="px-3 py-1 text-xs text-slate-500">
+                  <td className="px-3 py-1.5 text-right tabular-nums">{m.share.toFixed(2)}</td>
+                  <td className="px-3 py-1.5 text-right text-xs tabular-nums text-slate-500">
                     {m.trimmedLow != null && m.trimmedHigh != null
                       ? `${m.trimmedLow.toFixed(2)} / ${m.trimmedHigh.toFixed(2)}`
                       : "—"}
                   </td>
-                  <td className="px-3 py-1 font-medium">
-                    {m.factor.toFixed(2)}
-                    {m.flags.includes("lowFactor") && <span className="ml-1 text-xs text-red-600">flag</span>}
-                    {m.flags.includes("unanimousLow") && (
-                      <span
-                        className="ml-1 text-xs text-amber-700"
-                        title="Everyone rated this member the same and low. That is what a genuine free rider looks like — and what a coordinated dump looks like. Worth a conversation either way."
-                      >
-                        unanimous
-                      </span>
-                    )}
-                    {m.flags.includes("noSubmission") && (
-                      <span className="ml-1 text-xs text-slate-500">did not submit</span>
-                    )}
-                    {m.flags.includes("noRatings") && <span className="ml-1 text-xs text-slate-500">no ratings</span>}
+                  <td className="px-3 py-1.5 text-right font-semibold tabular-nums">{m.factor.toFixed(2)}</td>
+                  <td className="px-3 py-1.5">
+                    <span className="flex flex-wrap gap-1">
+                      {m.flags.includes("lowFactor") && <Badge tone="red">below 0.90</Badge>}
+                      {m.flags.includes("unanimousLow") && (
+                        <span title="Everyone rated this member the same and low. That is what a genuine free rider looks like — and what a coordinated dump looks like. Worth a conversation either way.">
+                          <Badge tone="amber">unanimous</Badge>
+                        </span>
+                      )}
+                      {m.flags.includes("noSubmission") && <Badge tone="gray">no ballot</Badge>}
+                      {m.flags.includes("noRatings") && <Badge tone="gray">no ratings</Badge>}
+                    </span>
                   </td>
                 </tr>
               ))}
             </tbody>
-            <tfoot className="text-xs text-slate-500">
-              <tr className="border-t border-slate-200">
-                <td className="px-3 py-1" colSpan={4}>
-                  Team mean — 1.00 unless someone genuinely under-contributed
+            <tfoot>
+              <tr className="border-t-2 border-slate-200">
+                <td className="px-3 py-1.5 text-xs text-slate-500" colSpan={4}>
+                  Team mean — exactly 1.00 unless someone genuinely under-contributed
                 </td>
-                <td className="px-3 py-1 font-medium">{factors.teamMean.toFixed(3)}</td>
+                <td className="px-3 py-1.5 text-right font-semibold tabular-nums text-slate-600">
+                  {factors.teamMean.toFixed(2)}
+                </td>
+                <td />
               </tr>
             </tfoot>
           </table>
