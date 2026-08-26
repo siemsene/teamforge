@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useSession } from "../sessions/SessionContext";
 import { getTeamDirectoryDoc, watchTeams } from "../../lib/db";
 import { eciesDecrypt } from "../../lib/crypto";
+import { openDirectoryNicknames } from "../../lib/nicknames";
 import { downloadFile, sessionFilename } from "../../lib/util";
-import type { ContractContent, TeamDirectory, TeamDoc } from "../../types";
+import type { ContractContent, Nicknames, TeamDirectory, TeamDoc } from "../../types";
 import { Badge, Button, Card, ErrorText, Spinner } from "../../components/ui";
 import { UnlockPanel } from "../sessions/UnlockPanel";
 import { RosterImport } from "./RosterImport";
@@ -26,9 +27,9 @@ export function TeamsTab() {
           <h2 className="mb-1 font-semibold">Team management</h2>
           <p className="text-sm text-slate-600">
             Optionally continue using this session after allocation: teams write a contract (with AI feedback) and you
-            run peer evaluations. Everything stays end-to-end encrypted — names are sealed per student under a key
-            derived from their login code, so this platform never stores them in plaintext. Start by uploading the
-            final team roster.
+            run peer evaluations. You upload only which team each student is on, sealed under a key derived from their
+            own login code — no names. Each student then picks the display name you and their team will see. Start by
+            uploading the final team roster.
           </p>
         </Card>
         <RosterImport existingConfig={session.teamMgmt} />
@@ -64,6 +65,7 @@ function ContractReview({
 }) {
   const { sessionKey, setSessionKey } = useSession();
   const [directory, setDirectory] = useState<TeamDirectory | null>(null);
+  const [nicknames, setNicknames] = useState<Nicknames>({});
   const [error, setError] = useState("");
   const [printing, setPrinting] = useState<{ label: string; content: ContractContent; finalizedAt: number | null } | null>(
     null,
@@ -78,18 +80,19 @@ function ContractReview({
           setError("No team directory found — re-provision the roster.");
           return;
         }
-        setDirectory(JSON.parse(await eciesDecrypt(sessionKey, doc.payload)) as TeamDirectory);
+        const dir = JSON.parse(await eciesDecrypt(sessionKey, doc.payload)) as TeamDirectory;
+        setDirectory(dir);
+        // Team docs are already loaded here, so resolve nicknames from them
+        // rather than re-fetching each one.
+        const byTokenHash = new Map(teams.map((t) => [t.tokenHash, t]));
+        setNicknames(
+          await openDirectoryNicknames(sid, dir.teams, async (tokenHash) => byTokenHash.get(tokenHash) ?? null),
+        );
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
       }
     })();
-  }, [sessionKey, sid]);
-
-  const namesByHash = useMemo(() => {
-    const m = new Map<string, string>();
-    directory?.teams.forEach((t) => t.members.forEach((mem) => m.set(mem.codeHash, mem.name)));
-    return m;
-  }, [directory]);
+  }, [sessionKey, sid, teams]);
 
   if (!sessionKey) {
     return (
@@ -148,7 +151,11 @@ function ContractReview({
               <TeamCard
                 key={t.tokenHash}
                 team={t}
-                memberNames={members.map((m) => namesByHash.get(m.codeHash) ?? `#${m.codeIndex}`)}
+                memberNames={members.map((m) =>
+                  nicknames[String(m.codeIndex)]
+                    ? `${nicknames[String(m.codeIndex)]} (#${m.codeIndex})`
+                    : `#${m.codeIndex} (no display name yet)`,
+                )}
                 readContract={readContract}
                 onPrint={(content) =>
                   setPrinting({ label: t.teamLabel, content, finalizedAt: t.contract.finalizedAt })

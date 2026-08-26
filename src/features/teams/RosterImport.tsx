@@ -9,14 +9,23 @@ import type { TeamMgmtConfig } from "../../types";
 
 type Stage =
   | { name: "idle" }
-  | { name: "preview"; rows: RosterRow[]; teams: ResolvedTeam[]; problems: string[] }
+  | {
+      name: "preview";
+      rows: RosterRow[];
+      teams: ResolvedTeam[];
+      problems: string[];
+      previewNames: Map<number, string>;
+    }
   | { name: "provisioning"; done: number; total: number }
   | { name: "done" };
 
 /**
- * Upload path: the completed login-codes CSV with `name` and `team` columns
- * added. Everything below runs in the instructor's browser — names are sealed
- * per student under a member key and never stored in plaintext.
+ * Upload path: the completed login-codes CSV with a `team` column added.
+ * Everything below runs in the instructor's browser.
+ *
+ * Only team membership is uploaded. A `name` column is tolerated and shown in
+ * the preview below so the instructor can confirm they picked the right file,
+ * but it never leaves this component — students choose their own display names.
  */
 export function RosterImport({ existingConfig }: { existingConfig?: TeamMgmtConfig }) {
   const { sid, session, students } = useSession();
@@ -35,12 +44,12 @@ export function RosterImport({ existingConfig }: { existingConfig?: TeamMgmtConf
       }
       const groups = groupByTeam(rows);
       const codesByIndex = new Map(rows.filter((r) => r.code && r.index != null).map((r) => [r.index!, r.code]));
-      const { teams, problems: resolveProblems } = await resolveRoster(
+      const { teams, problems: resolveProblems, previewNames } = await resolveRoster(
         students.map((s) => ({ hash: s.hash, codeIndex: s.codeIndex })),
         groups,
         codesByIndex,
       );
-      setStage({ name: "preview", rows, teams, problems: [...parseProblems, ...resolveProblems] });
+      setStage({ name: "preview", rows, teams, problems: [...parseProblems, ...resolveProblems], previewNames });
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -92,8 +101,9 @@ export function RosterImport({ existingConfig }: { existingConfig?: TeamMgmtConf
       <Card>
         <h3 className="mb-2 font-semibold">Review the roster</h3>
         <p className="mb-3 text-sm text-slate-600">
-          {stage.teams.length} teams, {teamedCount} of {students.length} students matched. Names are encrypted per
-          student and never stored in plaintext.
+          {stage.teams.length} teams, {teamedCount} of {students.length} students matched. Only team membership is
+          uploaded — any names in your file stay in this browser, and each student chooses the display name their
+          team and you will see.
         </p>
         {stage.problems.length > 0 && (
           <div className="mb-3 rounded-md bg-amber-50 p-3 text-sm text-amber-900">
@@ -112,7 +122,7 @@ export function RosterImport({ existingConfig }: { existingConfig?: TeamMgmtConf
               <tr>
                 <th className="px-3 py-1.5">Team</th>
                 <th className="px-3 py-1.5">#</th>
-                <th className="px-3 py-1.5">Name</th>
+                <th className="px-3 py-1.5">Name in your file (not uploaded)</th>
               </tr>
             </thead>
             <tbody>
@@ -121,7 +131,9 @@ export function RosterImport({ existingConfig }: { existingConfig?: TeamMgmtConf
                   <tr key={m.codeHash} className="border-t border-slate-100">
                     <td className="px-3 py-1.5">{t.label}</td>
                     <td className="px-3 py-1.5 text-slate-500">#{m.codeIndex}</td>
-                    <td className="px-3 py-1.5">{m.name}</td>
+                    <td className="px-3 py-1.5 text-slate-500">
+                      {stage.previewNames.get(m.codeIndex) ?? "—"}
+                    </td>
                   </tr>
                 )),
               )}

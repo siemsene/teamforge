@@ -1,11 +1,17 @@
 // Parse and validate the instructor's completed roster CSV for team management.
 //
 // The instructor starts from the login-codes CSV downloaded at session
-// creation and adds a name and a team label per row. We accept either the
-// login code or the code index to identify each student, so the instructor can
-// work from whichever column is convenient. Pure module — unit-testable; the
-// caller does the code→hash resolution (async crypto) and cross-checks against
-// the existing student docs.
+// creation and adds a team label per row. We accept either the login code or
+// the code index to identify each student, so the instructor can work from
+// whichever column is convenient. Pure module — unit-testable; the caller does
+// the code→hash resolution (async crypto) and cross-checks against the existing
+// student docs.
+//
+// A `name` column is tolerated but never uploaded: the instructor's working
+// sheet usually carries names, and it would be hostile to make them strip it.
+// Names parsed here are used only for the on-screen preview in the
+// instructor's own browser, so they can confirm they picked the right file.
+// Students choose their own display names (see lib/nicknames.ts).
 
 import { parseCsv } from "../../lib/util";
 
@@ -14,6 +20,7 @@ export interface RosterRow {
   code: string;
   /** Code index as written (may be blank if the sheet used code instead). */
   index: number | null;
+  /** Preview only — never sealed into any artifact. Empty when absent. */
   name: string;
   team: string;
 }
@@ -48,7 +55,6 @@ export function parseRosterCsv(text: string): ParsedRoster {
   const problems: string[] = [];
   if (codeCol < 0 && indexCol < 0)
     problems.push('The file needs a "code" or "index" column to identify each student.');
-  if (nameCol < 0) problems.push('The file needs a "name" column.');
   if (teamCol < 0) problems.push('The file needs a "team" column.');
   if (problems.length > 0) return { rows: [], problems };
 
@@ -69,7 +75,6 @@ export function parseRosterCsv(text: string): ParsedRoster {
       problems.push(`Row ${r + 1}: index "${indexRaw}" is not a whole number.`);
       continue;
     }
-    if (!name) problems.push(`Row ${r + 1}: missing name.`);
     if (!team) problems.push(`Row ${r + 1}: missing team.`);
     rows.push({ code, index, name, team });
   }

@@ -213,18 +213,25 @@ export interface PeerEvalSubmission {
   payload: EciesPayload;
 }
 
-/** Decrypted contents of a student's roster blob (never stored plaintext). */
+/** Decrypted contents of a student's roster blob (never stored plaintext).
+ *
+ * Carries no names: the instructor uploads team membership only. Display names
+ * are nicknames each student chooses for themselves (see TeamDoc.nicknames). */
 export interface RosterInfo {
   /** This student's own stable identifier (their code index). */
   codeIndex: number;
-  /** This student's own name (as the instructor entered it). */
-  name: string;
   /** Capability for the team doc and team key; never shown to the student. */
   teamToken: string;
   teamLabel: string;
   /** Excludes self; codeIndex is the stable ratee identifier. */
-  teammates: { codeIndex: number; name: string }[];
+  teammates: { codeIndex: number }[];
 }
+
+/** Decrypted nicknames for one team, keyed by code index (as a string). */
+export type Nicknames = Record<string, string>;
+
+/** Longest nickname a student may choose. */
+export const NICKNAME_MAX_LENGTH = 40;
 
 /** Decrypted peer-evaluation answers (never stored plaintext). */
 export interface PeerEvalAnswers {
@@ -286,6 +293,11 @@ export interface TeamDoc {
   teamLabel: string;
   createdAt: number;
   contract: ContractState;
+  /** Student-chosen display names, keyed by code index (as a string), each
+   * sealed under the team key. Written by the student who owns the entry; any
+   * team member (and the instructor, via the directory's team token) can read
+   * them. Absent entries mean that student hasn't chosen one yet. */
+  nicknames: Record<string, AesEnvelope>;
 }
 
 /** Instructor-only directory, ECIES-encrypted at sessions/{sid}/results/teamDirectory. */
@@ -294,7 +306,7 @@ export interface TeamDirectory {
   teams: {
     token: string;
     label: string;
-    members: { codeIndex: number; codeHash: string; name: string }[];
+    members: { codeIndex: number; codeHash: string }[];
   }[];
   /** codeHash -> base64 raw member key, so publishing results never needs the codes CSV again. */
   memberKeys: Record<string, string>;

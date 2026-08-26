@@ -323,6 +323,20 @@ export async function updateContract(sid: string, tokenHash: string, contract: C
   await updateDoc(doc(db, "sessions", sid, "teams", tokenHash), { contract });
 }
 
+/** Write one student's chosen display name. Uses a nested field path so the
+ * write touches exactly one key of the nicknames map — the security rules
+ * require that, so a member cannot rewrite the whole map in one go. */
+export async function setNickname(
+  sid: string,
+  tokenHash: string,
+  codeIndex: number,
+  nickname: AesEnvelope,
+): Promise<void> {
+  await updateDoc(doc(db, "sessions", sid, "teams", tokenHash), {
+    [`nicknames.${codeIndex}`]: nickname,
+  });
+}
+
 const ROUND_FIELD: Record<EvalRoundId, "peerEvalFormative" | "peerEvalSummative"> = {
   formative: "peerEvalFormative",
   summative: "peerEvalSummative",

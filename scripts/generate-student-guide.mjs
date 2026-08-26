@@ -118,7 +118,7 @@ p(
 // ---- privacy ----
 h2("How your privacy is protected");
 bullets([
-  "You're identified only by your random code — the platform never learns your name or email.",
+  "You're identified only by your random code — the platform never receives your name or email.",
   "Your answers are encrypted in your browser; the server only ever stores unreadable ciphertext.",
   "The decryption key is never sent to the server — only your instructor can read responses.",
   "Your instructor can permanently erase all survey data once teams are formed.",

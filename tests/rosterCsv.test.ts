@@ -33,11 +33,24 @@ describe("parseRosterCsv", () => {
   });
 
   it("flags a missing required column", () => {
-    const { problems } = parseRosterCsv(toCsv([["code", "team"], ["ABCDE-FGHJK", "Team 1"]]));
-    expect(problems.join(" ")).toMatch(/needs a "name" column/);
+    const { problems } = parseRosterCsv(toCsv([["code", "name"], ["ABCDE-FGHJK", "Ana"]]));
+    expect(problems.join(" ")).toMatch(/needs a "team" column/);
   });
 
-  it("reports rows missing a name or team but keeps them for review", () => {
+  it("accepts a file with no name column at all — only team membership matters", () => {
+    const csv = toCsv([
+      ["code", "team"],
+      ["ABCDE-FGHJK", "Team 1"],
+      ["MNPQR-STVWX", "Team 2"],
+    ]);
+    const { rows, problems } = parseRosterCsv(csv);
+    expect(problems).toHaveLength(0);
+    expect(rows).toHaveLength(2);
+    expect(rows[0].name).toBe("");
+    expect(rows[0].team).toBe("Team 1");
+  });
+
+  it("tolerates a blank name but still requires a team", () => {
     const csv = toCsv([
       ["code", "name", "team"],
       ["ABCDE-FGHJK", "", "Team 1"],
@@ -45,7 +58,7 @@ describe("parseRosterCsv", () => {
     ]);
     const { rows, problems } = parseRosterCsv(csv);
     expect(rows).toHaveLength(2);
-    expect(problems.join(" ")).toMatch(/missing name/);
+    expect(problems.join(" ")).not.toMatch(/missing name/);
     expect(problems.join(" ")).toMatch(/missing team/);
   });
 

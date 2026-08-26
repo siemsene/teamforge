@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
-import { getStudentByHash, getTeamByTokenHash } from "../../lib/db";
-import { deriveMemberKey, hashTeamToken, openEnvelope } from "../../lib/memberKey";
-import type { PublicConfig, RosterInfo, StudentDoc, TeamDoc } from "../../types";
+import { getStudentByHash, getTeamByTokenHash, setNickname } from "../../lib/db";
+import { deriveMemberKey, deriveTeamKey, hashTeamToken, openEnvelope } from "../../lib/memberKey";
+import { displayName, openNicknames, sealNickname } from "../../lib/nicknames";
+import type { Nicknames, PublicConfig, RosterInfo, StudentDoc, TeamDoc } from "../../types";
 import { Card, Spinner } from "../../components/ui";
 import { SurveyStageCard } from "./SurveyStageCard";
 import { ContractEditor } from "./ContractEditor";
+import { NicknameCard } from "./NicknameCard";
 import { PeerEvalCard } from "./PeerEvalCard";
 import { FormativeResults } from "./FormativeResults";
 
@@ -30,6 +32,9 @@ export function StudentHub({
   const [memberKey, setMemberKey] = useState<CryptoKey | null>(null);
   const [roster, setRoster] = useState<RosterInfo | null>(null);
   const [team, setTeam] = useState<(TeamDoc & { tokenHash: string }) | null>(null);
+  const [teamKey, setTeamKey] = useState<CryptoKey | null>(null);
+  const [nicknames, setNicknames] = useState<Nicknames>({});
+  const [savingNickname, setSavingNickname] = useState(false);
   const [current, setCurrent] = useState<StudentDoc>(student);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
@@ -45,6 +50,9 @@ export function StudentHub({
           const tokenHash = await hashTeamToken(info.teamToken);
           const teamDoc = await getTeamByTokenHash(sid, tokenHash);
           if (teamDoc) setTeam({ ...teamDoc, tokenHash });
+          const tKey = await deriveTeamKey(sid, info.teamToken);
+          setTeamKey(tKey);
+          if (teamDoc) setNicknames(await openNicknames(tKey, teamDoc.nicknames));
         }
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
@@ -61,7 +69,34 @@ export function StudentHub({
     if (info && memberKey) {
       const tokenHash = await hashTeamToken(info.teamToken);
       const teamDoc = await getTeamByTokenHash(sid, tokenHash);
-      if (teamDoc) setTeam({ ...teamDoc, tokenHash });
+      if (teamDoc) {
+        setTeam({ ...teamDoc, tokenHash });
+        if (teamKey) setNicknames(await openNicknames(teamKey, teamDoc.nicknames));
+      }
+    }
+  }
+
+  /** Seal the chosen name under the team key and write just that one entry. */
+  async function saveNickname(nickname: string) {
+    if (!roster || !team || !teamKey) return;
+    setSavingNickname(true);
+    setError("");
+    try {
+      const sealed = await sealNickname(teamKey, nickname);
+      await setNickname(sid, team.tokenHash, roster.codeIndex, sealed);
+      await refresh();
+    } catch (e) {
+      // Teams provisioned before display names existed have no nicknames map,
+      // which the security rules require — say so rather than showing a raw
+      // permission error the student cannot act on.
+      const message = e instanceof Error ? e.message : String(e);
+      setError(
+        /permission/i.test(message) && !team.nicknames
+          ? "This team was set up before display names were added. Ask your instructor to re-upload the roster on the Teams tab, then try again."
+          : message,
+      );
+    } finally {
+      setSavingNickname(false);
     }
   }
 
@@ -97,12 +132,26 @@ export function StudentHub({
 
       {roster && (
         <>
+          {team && teamKey && (
+            <NicknameCard
+              codeIndex={roster.codeIndex}
+              nicknames={nicknames}
+              busy={savingNickname}
+              onSave={saveNickname}
+            />
+          )}
+
           <Card>
             <h2 className="mb-1 font-semibold">Your team — {roster.teamLabel}</h2>
             <ul className="text-sm text-slate-700">
-              <li className="font-medium">{roster.name} (you)</li>
+              <li className="font-medium">{displayName(roster.codeIndex, nicknames)} (you)</li>
               {roster.teammates.map((t) => (
-                <li key={t.codeIndex}>{t.name}</li>
+                <li key={t.codeIndex}>
+                  {displayName(t.codeIndex, nicknames)}
+                  {!nicknames[String(t.codeIndex)] && (
+                    <span className="text-slate-500"> — hasn't chosen a display name yet</span>
+                  )}
+                </li>
               ))}
             </ul>
           </Card>
@@ -122,6 +171,7 @@ export function StudentHub({
             config={config}
             hash={hash}
             roster={roster}
+            nicknames={nicknames}
             round="formative"
             submission={current.peerEvalFormative ?? null}
             onChanged={refresh}
@@ -131,6 +181,7 @@ export function StudentHub({
             config={config}
             hash={hash}
             roster={roster}
+            nicknames={nicknames}
             round="summative"
             submission={current.peerEvalSummative ?? null}
             onChanged={refresh}

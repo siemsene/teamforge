@@ -12,7 +12,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "docs": "node scripts/generate-instructor-guide.mjs && node scripts/generate-student-guide.mjs",
-    "test:rules": "firebase emulators:exec --only firestore --project demo-teamforge \"vitest run tests/rules.test.ts\""
+    "test:rules": "firebase emulators:exec --only firestore --project demo-teamforge \"vitest run tests/rules.test.ts tests/nicknameFlow.test.ts\""
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

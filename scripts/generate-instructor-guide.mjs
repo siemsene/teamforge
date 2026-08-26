@@ -114,7 +114,7 @@ p(
 note(
   "Privacy in one line",
   "Student answers are encrypted in the student's browser before upload, the decryption key never reaches the server, " +
-    "and the optimizer runs inside your browser. The platform stores only ciphertext and never learns student names or emails.",
+    "and the optimizer runs inside your browser. The platform stores only ciphertext and never receives student names or emails.",
 );
 space(0.3);
 doc.fillColor(SUB).font("Helvetica-Oblique").fontSize(9.5).text(
@@ -352,9 +352,18 @@ p(
 );
 h3("Uploading the final roster");
 bullets([
-  "Take the login-codes CSV you downloaded when creating the session and add two columns: name and team (any label, e.g. \"Team 1\" or a project name). Teams may differ from the optimizer's output if you adjusted them.",
-  "On the Teams tab, upload that CSV. Your browser encrypts each student's name and team under a key derived from their own login code, so the platform still never stores names or team membership in plaintext.",
+  "Take the login-codes CSV you downloaded when creating the session and add one column: team (any label, e.g. \"Team 1\" or a project name). Teams may differ from the optimizer's output if you adjusted them.",
+  "You do not upload names. If your working sheet already has a name column, leave it — TeamForge shows those names in the on-screen preview so you can confirm you picked the right file, but they never leave your browser.",
+  "On the Teams tab, upload that CSV. Your browser encrypts each student's team membership under a key derived from their own login code, so the platform never stores team membership in plaintext either.",
   "Students log in with the same code they used for the survey.",
+]);
+
+h3("Display names (students choose their own)");
+bullets([
+  "On first login a student is asked to choose a display name. It is encrypted under their team's key, so only their teammates and you can read it — the platform stores it unreadable.",
+  "Students may use their real name, a short form, or any nickname; the app tells them to share their choice with their teammates so everyone knows who is who when evaluating.",
+  "Until a student chooses one, they appear to teammates and to you as their code number (e.g. #7). Everything still works — the code index, not the name, is what the factor maths uses.",
+  "Your review tables and CSV exports show the display name next to the code index. Because you hold the codes CSV, you can map a code index back to the real student for your gradebook; TeamForge itself never learns that mapping.",
 ]);
 h3("Team contracts");
 bullets([
@@ -390,6 +399,9 @@ const faq = [
   ["Nothing happens when I change something.", "TeamForge shows an inline error if a save fails (e.g. you're offline). Check your connection and try again."],
   ["The AI feedback button doesn't appear for teams.", "It only shows when the AI proxy is configured (VITE_AI_PROXY_URL) and \"Offer AI contract feedback\" is checked in the Peer evals settings. Without the proxy, contracts still work — just without AI feedback."],
   ["A peer-eval factor looks off.", "Neutral is 100 divided by the number of teammates who actually rated the student, so partial submissions shift it. On teams of five or more the rating farthest from the median is discarded. Export the detail CSV to see every allocation."],
+  ["A student shows as \"#7\" instead of a name.", "They haven't chosen a display name yet — it appears as soon as they log in and pick one. Nothing is blocked in the meantime: contracts and peer evaluations work, and the code index is what the factor calculation uses either way."],
+  ["Two students picked confusingly similar display names.", "The app already refuses an exact duplicate within a team. For near-duplicates, ask one of them to change it (Change on their hub); tables and exports also show the code index so you can always tell them apart."],
+  ["How do I get from a display name back to the real student?", "Use the code index shown beside it and your own login-codes CSV, where you kept the code-to-student mapping. That join happens in your spreadsheet — the platform never holds it."],
 ];
 faq.forEach(([q, a]) => {
   h3(q);

@@ -1,8 +1,9 @@
 import { useMemo, useState } from "react";
 import { useSession } from "../sessions/SessionContext";
-import { getTeamDirectoryDoc, publishEvalResults, saveTeamMgmt } from "../../lib/db";
+import { getTeamByTokenHash, getTeamDirectoryDoc, publishEvalResults, saveTeamMgmt } from "../../lib/db";
 import { eciesDecrypt, fromBase64 } from "../../lib/crypto";
 import { importMemberKey, sealEnvelope } from "../../lib/memberKey";
+import { displayName, openDirectoryNicknames } from "../../lib/nicknames";
 import { publicTeamMgmt } from "../teams/contractTemplate";
 import { downloadFile, sessionFilename, toCsv } from "../../lib/util";
 import { LOW_FACTOR_FLAG, computeTeamFactors, type TeamFactorResult } from "../../lib/teamFactor";
@@ -10,6 +11,7 @@ import type {
   AesEnvelope,
   EvalResultView,
   EvalRoundId,
+  Nicknames,
   PeerEvalAnswers,
   TeamDirectory,
 } from "../../types";
@@ -24,6 +26,7 @@ export function EvalReview() {
     round: EvalRoundId;
     directory: TeamDirectory;
     byRater: Map<string, PeerEvalAnswers>;
+    nicknames: Nicknames;
   } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -55,7 +58,10 @@ export function EvalReview() {
           }
         }
       }
-      setDecrypted({ round, directory, byRater });
+      const nicknames = await openDirectoryNicknames(sid, directory.teams, (tokenHash) =>
+        getTeamByTokenHash(sid, tokenHash),
+      );
+      setDecrypted({ round, directory, byRater, nicknames });
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -82,8 +88,7 @@ export function EvalReview() {
 
   function exportCsv() {
     if (!decrypted || !results) return;
-    const nameByIdx = new Map<number, string>();
-    decrypted.directory.teams.forEach((t) => t.members.forEach((m) => nameByIdx.set(m.codeIndex, m.name)));
+    const nicknames = decrypted.nicknames;
     const behaviorCols = tm.includeBehaviors ? tm.behaviors.map((_, i) => `behaviorAvg${i + 1}`) : [];
     const header = [
       "team",
@@ -101,7 +106,7 @@ export function EvalReview() {
       for (const m of factors.members) {
         rows.push([
           factors.teamLabel,
-          nameByIdx.get(m.codeIndex) ?? `#${m.codeIndex}`,
+          displayName(m.codeIndex, nicknames),
           m.codeIndex,
           m.raterCount,
           m.neutralShare?.toFixed(2) ?? "",
@@ -128,8 +133,8 @@ export function EvalReview() {
           if (ratee.codeIndex === rater.codeIndex) continue;
           detail.push([
             team.label,
-            rater.name,
-            ratee.name,
+            displayName(rater.codeIndex, decrypted.nicknames),
+            displayName(ratee.codeIndex, decrypted.nicknames),
             ans.points[String(ratee.codeIndex)] ?? "",
             ans.justifications[String(ratee.codeIndex)] ?? "",
             ratee.codeIndex === team.members[0].codeIndex ? (ans.commentToInstructor ?? "") : "",
@@ -262,7 +267,7 @@ export function EvalReview() {
           <ErrorText>{error}</ErrorText>
           {info && <p className="mt-2 text-sm text-green-700">{info}</p>}
           {decrypted?.round === round && results && (
-            <FactorTable results={results} nameByHash={decrypted.directory} />
+            <FactorTable results={results} nicknames={decrypted.nicknames} />
           )}
         </>
       )}
@@ -272,16 +277,16 @@ export function EvalReview() {
 
 function FactorTable({
   results,
-  nameByHash,
+  nicknames,
 }: {
   results: { team: TeamDirectory["teams"][number]; factors: TeamFactorResult }[];
-  nameByHash: TeamDirectory;
+  nicknames: Nicknames;
 }) {
   const nameByIdx = useMemo(() => {
     const m = new Map<number, string>();
-    nameByHash.teams.forEach((t) => t.members.forEach((mem) => m.set(mem.codeIndex, mem.name)));
+    Object.entries(nicknames).forEach(([idx, name]) => m.set(Number(idx), name));
     return m;
-  }, [nameByHash]);
+  }, [nicknames]);
 
   return (
     <div className="mt-4 space-y-4">

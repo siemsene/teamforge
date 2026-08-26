@@ -1,6 +1,11 @@
-// Roster provisioning: turn the instructor's validated roster (codes + names +
-// teams, held in memory) into the encrypted Firestore artifacts. Runs entirely
-// in the instructor's browser; plaintext names never leave it.
+// Roster provisioning: turn the instructor's validated roster (codes + teams,
+// held in memory) into the encrypted Firestore artifacts. Runs entirely in the
+// instructor's browser.
+//
+// No names are involved: the instructor asserts only which code index sits on
+// which team. Display names are nicknames students choose for themselves and
+// seal under the team key, so the platform never receives an
+// instructor-asserted identity at all.
 
 import { eciesEncrypt, toBase64 } from "../../lib/crypto";
 import { hashCode } from "../../lib/codes";
@@ -26,7 +31,6 @@ export interface ResolvedMember {
   codeHash: string;
   /** The login code, needed to derive the member key. */
   code: string;
-  name: string;
 }
 
 export interface ResolvedTeam {
@@ -73,23 +77,22 @@ export async function buildProvisioning(
     const tokenHash = await hashTeamToken(token);
     teamDocs.push({
       tokenHash,
-      team: { teamLabel: team.label, createdAt: Date.now(), contract: emptyContract() },
+      team: { teamLabel: team.label, createdAt: Date.now(), contract: emptyContract(), nicknames: {} },
     });
     directory.teams.push({
       token,
       label: team.label,
-      members: team.members.map((m) => ({ codeIndex: m.codeIndex, codeHash: m.codeHash, name: m.name })),
+      members: team.members.map((m) => ({ codeIndex: m.codeIndex, codeHash: m.codeHash })),
     });
 
     for (const member of team.members) {
       const roster: RosterInfo = {
         codeIndex: member.codeIndex,
-        name: member.name,
         teamToken: token,
         teamLabel: team.label,
         teammates: team.members
           .filter((o) => o.codeIndex !== member.codeIndex)
-          .map((o) => ({ codeIndex: o.codeIndex, name: o.name })),
+          .map((o) => ({ codeIndex: o.codeIndex })),
       };
       const memberKey = await deriveMemberKey(sid, member.code);
       const sealed = await sealEnvelope(memberKey, JSON.stringify(roster));
@@ -104,6 +107,15 @@ export async function buildProvisioning(
   return { studentPatches, teamDocs, directoryPayload };
 }
 
+/** How to refer to a roster row in an error message. Prefers the preview-only
+ * name when the sheet had one (it never leaves the instructor's browser), and
+ * falls back to the code index. */
+function rowLabel(row: RosterRow): string {
+  if (row.name) return `"${row.name}"`;
+  if (row.index != null) return `index ${row.index}`;
+  return "a row";
+}
+
 /**
  * Resolve validated roster rows against the existing student docs. Returns the
  * teams ready for provisioning, or a list of problems (unknown codes/indexes,
@@ -114,8 +126,12 @@ export async function resolveRoster(
   students: { hash: string; codeIndex: number }[],
   teamsByLabel: { label: string; members: RosterRow[] }[],
   codesByIndex?: Map<number, string>,
-): Promise<{ teams: ResolvedTeam[]; problems: string[] }> {
+): Promise<{ teams: ResolvedTeam[]; problems: string[]; previewNames: Map<number, string> }> {
   const problems: string[] = [];
+  // Names from the instructor's sheet, kept only so the on-screen preview can
+  // confirm the right file was picked. Deliberately not part of ResolvedMember,
+  // so they cannot reach buildProvisioning and be sealed into anything.
+  const previewNames = new Map<number, string>();
   const hashByIndex = new Map(students.map((s) => [s.codeIndex, s.hash]));
   const knownHashes = new Set(students.map((s) => s.hash));
   const seen = new Set<string>();
@@ -128,7 +144,7 @@ export async function resolveRoster(
     if (code) {
       codeHash = await hashCode(code);
       if (!knownHashes.has(codeHash)) {
-        problems.push(`Login code for "${row.name || "a row"}" does not match any student in this session.`);
+        problems.push(`Login code for ${rowLabel(row)} does not match any student in this session.`);
         return null;
       }
       const match = students.find((s) => s.hash === codeHash);
@@ -136,13 +152,13 @@ export async function resolveRoster(
     } else if (codeIndex != null) {
       const hash = hashByIndex.get(codeIndex);
       if (!hash) {
-        problems.push(`Index ${codeIndex} ("${row.name}") is not a student in this session.`);
+        problems.push(`Index ${codeIndex} (${rowLabel(row)}) is not a student in this session.`);
         return null;
       }
       codeHash = hash;
       const supplied = codesByIndex?.get(codeIndex);
       if (!supplied) {
-        problems.push(`No login code available for index ${codeIndex} ("${row.name}") — provide the codes CSV.`);
+        problems.push(`No login code available for index ${codeIndex} (${rowLabel(row)}) — provide the codes CSV.`);
         return null;
       }
       code = supplied;
@@ -151,11 +167,12 @@ export async function resolveRoster(
     }
 
     if (seen.has(codeHash)) {
-      problems.push(`"${row.name}" appears more than once in the roster.`);
+      problems.push(`${rowLabel(row)} appears more than once in the roster.`);
       return null;
     }
     seen.add(codeHash);
-    return { codeIndex: codeIndex!, codeHash, code, name: row.name };
+    if (row.name) previewNames.set(codeIndex!, row.name);
+    return { codeIndex: codeIndex!, codeHash, code };
   };
 
   const teams: ResolvedTeam[] = [];
@@ -167,5 +184,5 @@ export async function resolveRoster(
     }
     if (members.length > 0) teams.push({ label: group.label, members });
   }
-  return { teams, problems };
+  return { teams, problems, previewNames };
 }

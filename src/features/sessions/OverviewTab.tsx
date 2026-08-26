@@ -22,7 +22,7 @@ function defaultEmailTemplate(title: string, link: string): string {
 
 Dear <STUDENT NAME>,
 
-To help form project teams, please complete a short survey. Your responses are anonymous and encrypted — the platform never learns your name, and only I can read the answers (see the privacy notice on the survey page).
+To help form project teams, please complete a short survey. Your responses are anonymous and encrypted — the platform never receives your name, and only I can read the answers (see the privacy notice on the survey page).
 
 1. Open: ${link}
 2. Enter your personal login code: <LOGIN CODE>
@@ -227,8 +227,9 @@ export function OverviewTab() {
             <div className="flex items-center justify-between gap-4">
               <p className="text-sm text-slate-600">
                 Continue using this session after allocation: let teams write a contract (with optional AI feedback)
-                and run two rounds of peer evaluations. Names stay end-to-end encrypted. You can turn this on now and
-                upload the final team roster.
+                and run two rounds of peer evaluations. You upload team membership only — students choose their own
+                display names, so no student name is ever uploaded. You can turn this on now and upload the final
+                team roster.
               </p>
               <Button onClick={enableTeamManagement} disabled={busy}>
                 Enable team management

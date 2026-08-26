@@ -111,7 +111,7 @@ function LandingPage() {
       <Card className="bg-indigo-50">
         <h2 className="mb-2 font-semibold">How your privacy is protected</h2>
         <ul className="list-disc space-y-1 pl-5 text-sm text-slate-700">
-          <li>Students are identified only by random login codes — the platform never learns names or emails.</li>
+          <li>Students are identified only by random login codes — the platform never receives names or emails.</li>
           <li>
             Survey answers are <strong>encrypted in your browser</strong> before upload, so the server only ever
             stores ciphertext. The decryption key is never sent to the server — only the instructor can read responses.

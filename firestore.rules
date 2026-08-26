@@ -131,6 +131,22 @@ service cloud.firestore {
         && (c.finalizedAt == null || c.finalizedAt is number);
     }
 
+    // A student writing their own display name touches exactly one key of the
+    // nicknames map. We cannot verify *which* member is writing — holding the
+    // team token is the capability, same as for the shared contract — but
+    // one-key-at-a-time stops a single write from rewriting the whole team's
+    // names, and the cap bounds growth. Values stay opaque ciphertext; a
+    // garbage entry only fails to decrypt and falls back to the code index.
+    function isValidNicknameUpdate() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(["nicknames"])
+        && ("nicknames" in resource.data)
+        && request.resource.data.nicknames is map
+        && request.resource.data.nicknames.size() <= 60
+        && request.resource.data.nicknames
+             .diff(resource.data.nicknames)
+             .affectedKeys().size() == 1;
+    }
+
     match /users/{uid} {
       // Self-registration always starts unapproved.
       allow create: if isSignedIn()
@@ -185,7 +201,8 @@ service cloud.firestore {
         allow get: if isSignedIn();
         allow list, create, delete: if ownsSession(sid);
         allow update: if ownsSession(sid)
-          || (isSignedIn() && teamMgmtOn(sid) && isValidContractUpdate());
+          || (isSignedIn() && teamMgmtOn(sid) && isValidContractUpdate())
+          || (isSignedIn() && teamMgmtOn(sid) && isValidNicknameUpdate());
       }
 
       match /results/{docId} {

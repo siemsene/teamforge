@@ -5,7 +5,8 @@ import {
   needsJustification,
   validatePeerEval,
 } from "../../lib/evalValidation";
-import type { EvalRoundId, PeerEvalAnswers, PublicTeamMgmt, RosterInfo } from "../../types";
+import type { EvalRoundId, Nicknames, PeerEvalAnswers, PublicTeamMgmt, RosterInfo } from "../../types";
+import { displayName } from "../../lib/nicknames";
 import { Button, ErrorText, Input, Select, TextArea } from "../../components/ui";
 
 /** The fixed three-part peer-evaluation form (100-point allocation, optional
@@ -13,12 +14,14 @@ import { Button, ErrorText, Input, Select, TextArea } from "../../components/ui"
  * published spec. */
 export function PeerEvalForm({
   roster,
+  nicknames,
   tm,
   round,
   busy,
   onSubmit,
 }: {
   roster: RosterInfo;
+  nicknames: Nicknames;
   tm: PublicTeamMgmt;
   round: EvalRoundId;
   busy: boolean;
@@ -93,7 +96,7 @@ export function PeerEvalForm({
             return (
               <div key={t.codeIndex} className="rounded-md border border-slate-200 p-2">
                 <div className="flex items-center gap-3">
-                  <span className="flex-1 text-sm">{t.name}</span>
+                  <span className="flex-1 text-sm">{displayName(t.codeIndex, nicknames)}</span>
                   <Input
                     type="number"
                     min={0}
@@ -131,7 +134,7 @@ export function PeerEvalForm({
           <div className="mt-2 space-y-3">
             {teammates.map((t) => (
               <div key={t.codeIndex} className="rounded-md border border-slate-200 p-2">
-                <p className="mb-1 text-sm font-medium">{t.name}</p>
+                <p className="mb-1 text-sm font-medium">{displayName(t.codeIndex, nicknames)}</p>
                 <div className="space-y-1">
                   {tm.behaviors.map((b, bi) => (
                     <div key={bi} className="flex items-center gap-2">

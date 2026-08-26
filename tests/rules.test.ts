@@ -227,6 +227,7 @@ describe.skipIf(!emulatorHost)("firestore security rules", () => {
         teamLabel: "Team 1",
         createdAt: 1,
         contract: EMPTY_CONTRACT,
+        nicknames: {},
       });
     });
   }
@@ -280,6 +281,57 @@ describe.skipIf(!emulatorHost)("firestore security rules", () => {
     await assertFails(
       updateDoc(doc(student, "sessions/s1/teams/tok1"), { contract: { ...DRAFT_CONTRACT, content: "nope" } }),
     );
+  });
+
+  it("a team member may set exactly one nickname entry at a time", async () => {
+    await enableTeamMgmt("open");
+    const student = env.authenticatedContext("anonuser").firestore();
+    // Own entry: one key of the map.
+    await assertSucceeds(updateDoc(doc(student, "sessions/s1/teams/tok1"), { "nicknames.3": AES_ENV }));
+    // A second, separate write is fine too.
+    await assertSucceeds(updateDoc(doc(student, "sessions/s1/teams/tok1"), { "nicknames.4": AES_ENV }));
+    // Changing it again later (same key) stays allowed.
+    await assertSucceeds(updateDoc(doc(student, "sessions/s1/teams/tok1"), { "nicknames.4": AES_ENV }));
+  });
+
+  it("a team member cannot rewrite several nicknames in one write", async () => {
+    await enableTeamMgmt("open");
+    const student = env.authenticatedContext("anonuser").firestore();
+    await assertFails(
+      updateDoc(doc(student, "sessions/s1/teams/tok1"), { "nicknames.3": AES_ENV, "nicknames.4": AES_ENV }),
+    );
+    // Replacing the whole map at once is rejected the same way.
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await updateDoc(doc(ctx.firestore(), "sessions/s1/teams/tok1"), {
+        nicknames: { "3": AES_ENV, "4": AES_ENV },
+      });
+    });
+    await assertFails(updateDoc(doc(student, "sessions/s1/teams/tok1"), { nicknames: {} }));
+  });
+
+  it("a nickname write cannot smuggle in other field changes", async () => {
+    await enableTeamMgmt("open");
+    const student = env.authenticatedContext("anonuser").firestore();
+    await assertFails(
+      updateDoc(doc(student, "sessions/s1/teams/tok1"), { "nicknames.3": AES_ENV, teamLabel: "Hacked" }),
+    );
+    await assertFails(
+      updateDoc(doc(student, "sessions/s1/teams/tok1"), { "nicknames.3": AES_ENV, createdAt: 99 }),
+    );
+  });
+
+  it("students cannot set a nickname when team management is disabled", async () => {
+    // teamMgmt not set on the seeded session.
+    const student = env.authenticatedContext("anonuser").firestore();
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "sessions/s1/teams/tok1"), {
+        teamLabel: "Team 1",
+        createdAt: 1,
+        contract: EMPTY_CONTRACT,
+        nicknames: {},
+      });
+    });
+    await assertFails(updateDoc(doc(student, "sessions/s1/teams/tok1"), { "nicknames.3": AES_ENV }));
   });
 
   it("students cannot update a contract when team management is disabled", async () => {

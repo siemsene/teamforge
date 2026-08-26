@@ -1,7 +1,14 @@
 import { useState } from "react";
 import { submitPeerEval, withdrawPeerEval } from "../../lib/db";
 import { eciesEncrypt } from "../../lib/crypto";
-import type { EvalRoundId, PeerEvalAnswers, PeerEvalSubmission, PublicConfig, RosterInfo } from "../../types";
+import type {
+  EvalRoundId,
+  Nicknames,
+  PeerEvalAnswers,
+  PeerEvalSubmission,
+  PublicConfig,
+  RosterInfo,
+} from "../../types";
 import { Button, Card, ConfirmDialog, ErrorText } from "../../components/ui";
 import { PeerEvalForm } from "./PeerEvalForm";
 
@@ -17,6 +24,7 @@ export function PeerEvalCard({
   config,
   hash,
   roster,
+  nicknames,
   round,
   submission,
   onChanged,
@@ -25,6 +33,7 @@ export function PeerEvalCard({
   config: PublicConfig;
   hash: string;
   roster: RosterInfo;
+  nicknames: Nicknames;
   round: EvalRoundId;
   submission: PeerEvalSubmission | null;
   onChanged: () => void | Promise<void>;
@@ -95,7 +104,14 @@ export function PeerEvalCard({
         </p>
       ) : editing ? (
         <>
-          <PeerEvalForm roster={roster} tm={tm} round={round} busy={busy} onSubmit={submit} />
+          <PeerEvalForm
+            roster={roster}
+            nicknames={nicknames}
+            tm={tm}
+            round={round}
+            busy={busy}
+            onSubmit={submit}
+          />
           <div className="mt-2">
             <Button variant="ghost" onClick={() => setEditing(false)} disabled={busy}>
               Cancel
