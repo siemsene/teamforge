@@ -2,7 +2,8 @@ import { useState } from "react";
 import { useSession } from "../sessions/SessionContext";
 import { saveTeamMgmt } from "../../lib/db";
 import { publicTeamMgmt } from "../teams/contractTemplate";
-import { resolveFactorParams } from "../../lib/teamFactor";
+import { resolveFactorParams, shareToFactor } from "../../lib/teamFactor";
+import { neutralRange } from "../../lib/evalValidation";
 import type { EvalRoundId, RoundStatus, TeamMgmtConfig } from "../../types";
 import { Button, Card, ErrorText, Field, NumberInput } from "../../components/ui";
 import { EvalReview } from "./EvalReview";
@@ -50,6 +51,14 @@ function SettingsCard({ config }: { config: TeamMgmtConfig }) {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
   const [error, setError] = useState("");
+
+  // Uses the values currently in the form, so the effect is visible before saving.
+  const previewParams = { factorFloor: floor, factorCeiling: ceiling, deadband, damping };
+  const preview = {
+    band: neutralRange(4, deadband),
+    strong: shareToFactor(1.2, previewParams),
+    weak: shareToFactor(0.6, previewParams),
+  };
 
   const dirty =
     floor !== params.factorFloor ||
@@ -101,9 +110,9 @@ function SettingsCard({ config }: { config: TeamMgmtConfig }) {
     <Card>
       <h2 className="mb-2 font-semibold">Evaluation settings</h2>
       <p className="mb-3 text-sm text-slate-600">
-        A share of 1.00 is an even split. Deviations within the dead band are treated as noise and leave the factor
-        at exactly 1.00; beyond it the deviation is damped and then clipped. Keeping the ceiling tighter than the
-        floor is deliberate — it is what stops a group profiting by agreeing to sink one member.{" "}
+        The team factor multiplies the team-scored part of a student&rsquo;s grade. It is worked out from the share of
+        the 100 points each student receives, where <strong>1.00 is an even split</strong>: the highest and lowest
+        share they were given are dropped, the rest averaged, and the result put through the four settings below.{" "}
         <a
           className="text-indigo-600 hover:underline"
           href="/peer-eval-team-factor.xlsx"
@@ -114,28 +123,72 @@ function SettingsCard({ config }: { config: TeamMgmtConfig }) {
         </a>{" "}
         — a live spreadsheet of the same arithmetic, ready to share with students.
       </p>
-      <div className="flex flex-wrap items-end gap-4">
-        <Field label="Team-factor floor">
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Field label="Lowest factor" hint="However harshly a student is rated, their factor stops here.">
           <NumberInput className="w-24" min={0.5} max={1} step={0.05} value={floor} onValueChange={setFloor} />
         </Field>
-        <Field label="Team-factor ceiling">
+        <Field
+          label="Highest factor"
+          hint="Keep this nearer 1.00 than the floor. That asymmetry is what makes it unprofitable for a group to agree to mark one member down."
+        >
           <NumberInput className="w-24" min={1} max={1.5} step={0.05} value={ceiling} onValueChange={setCeiling} />
         </Field>
-        <Field label="Dead band (δ)">
+        <Field
+          label="Dead band (δ)"
+          hint="How far from an even split still counts as even. Inside it the factor is exactly 1.00, and students are not asked to justify the allocation."
+        >
           <NumberInput className="w-24" min={0} max={0.5} step={0.01} value={deadband} onValueChange={setDeadband} />
         </Field>
-        <Field label="Damping (k)">
+        <Field
+          label="Damping (k)"
+          hint="How much of the deviation beyond the dead band carries through. 0.5 passes on half of it."
+        >
           <NumberInput className="w-24" min={0.1} max={1} step={0.05} value={damping} onValueChange={setDamping} />
         </Field>
-        <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" checked={includeBehaviors} onChange={(e) => setIncludeBehaviors(e.target.checked)} />
-          Include behavior ratings (Part 2)
-        </label>
-        <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" checked={aiEnabled} onChange={(e) => setAiEnabled(e.target.checked)} />
-          Offer AI contract feedback
-        </label>
       </div>
+
+      <div className="mt-4 space-y-3">
+        <div>
+          <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
+            <input type="checkbox" checked={includeBehaviors} onChange={(e) => setIncludeBehaviors(e.target.checked)} />
+            Include behavior ratings (Part 2)
+          </label>
+          <p className="mt-1 text-xs text-slate-500">
+            Adds Part 2 to the form: each teammate rated 1–5 on the behaviours below. The averages are reported to you
+            and back to each student, but never affect the factor.
+          </p>
+        </div>
+        <div>
+          <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
+            <input type="checkbox" checked={aiEnabled} onChange={(e) => setAiEnabled(e.target.checked)} />
+            Offer AI contract feedback
+          </label>
+          <p className="mt-1 text-xs text-slate-500">
+            Lets teams ask for feedback on a contract draft. This is the one feature where text (never names) leaves
+            the app&rsquo;s encryption, and it only appears if the AI proxy is configured.
+          </p>
+        </div>
+      </div>
+
+      <div className="mt-4 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm">
+        <p className="mb-1 font-medium text-slate-700">What these settings do, on a team of five</p>
+        <ul className="space-y-0.5 text-slate-600">
+          <li>
+            An even split is 25 points each. Anything from <strong>{preview.band.low}</strong> to{" "}
+            <strong>{preview.band.high}</strong> still counts as even: factor 1.00, and no justification asked for.
+          </li>
+          <li>
+            A student given about a fifth more than an even share ends on{" "}
+            <strong>{preview.strong.toFixed(2)}</strong>; one given little enough to look like a free rider ends on{" "}
+            <strong>{preview.weak.toFixed(2)}</strong>.
+          </li>
+          <li>
+            The furthest two teammates can end apart is <strong>{(ceiling - floor).toFixed(2)}</strong>, and no group
+            can gain more in total than the one member they mark down loses.
+          </li>
+        </ul>
+      </div>
+
       <div className="mt-3 flex items-center gap-2">
         <Button onClick={save} disabled={busy || !dirty}>
           {busy ? "Saving…" : "Save settings"}
