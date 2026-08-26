@@ -129,6 +129,13 @@ export default {
       return json({ error: "Not found." }, 404, env);
     }
 
+    // CORS headers only constrain browsers; also enforce the origin server-side
+    // so scripts can't spend the API key. The app always sends Origin on this
+    // cross-origin POST, so requiring an exact match rejects direct clients.
+    if (request.headers.get("origin") !== env.ALLOWED_ORIGIN) {
+      return json({ error: "Forbidden origin." }, 403, env);
+    }
+
     let body: unknown;
     try {
       body = await request.json();
