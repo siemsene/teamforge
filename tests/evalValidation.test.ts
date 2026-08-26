@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  evenSplit,
   justificationApplies,
   needsJustification,
   neutralRange,
@@ -27,6 +28,18 @@ describe("neutralRange", () => {
     expect(neutralRange(4)).toEqual({ neutral: 25, low: 23, high: 27 });
     expect(neutralRange(3)).toEqual({ neutral: 100 / 3, low: 31, high: 36 });
     expect(neutralRange(2)).toEqual({ neutral: 50, low: 46, high: 54 });
+  });
+
+  it("widens to admit the even split when the band is narrower than a point", () => {
+    // 11 teammates: neutral 9.09, so a purely relative band gives 9-9. But 100
+    // does not divide by 11 -- somebody must get 10. Before the floor/ceil
+    // guard the form opened demanding a justification for that rounding.
+    expect(neutralRange(11)).toEqual({ neutral: 100 / 11, low: 9, high: 10 });
+    expect(needsJustification(10, 11)).toBe(false);
+
+    // Sizes where the relative band is already wide enough are untouched.
+    expect(neutralRange(4)).toEqual({ neutral: 25, low: 23, high: 27 });
+    expect(neutralRange(7)).toEqual({ neutral: 100 / 7, low: 14, high: 15 });
   });
 
   it("leaves the pre-filled even split inside the band despite rounding", () => {
@@ -239,5 +252,48 @@ describe("pruneJustifications", () => {
       "4": "c",
       "5": "d",
     });
+  });
+});
+
+describe("evenSplit", () => {
+  it("always totals exactly 100", () => {
+    for (let n = 1; n <= 12; n++) {
+      const split = evenSplit(Array.from({ length: n }, (_, i) => i + 2));
+      expect(Object.values(split).reduce((a, b) => a + b, 0)).toBe(100);
+    }
+  });
+
+  it("hands the remainder out one point at a time", () => {
+    expect(evenSplit([2, 3, 4])).toEqual({ "2": 34, "3": 33, "4": 33 });
+    expect(evenSplit([2, 3, 4, 5])).toEqual({ "2": 25, "3": 25, "4": 25, "5": 25 });
+    expect(evenSplit([2, 3])).toEqual({ "2": 50, "3": 50 });
+  });
+
+  it("never demands a justification for itself", () => {
+    // The form opens on this split. If any team size produced a default that
+    // fell outside its own dead band, students would be asked to explain an
+    // allocation they never chose -- and every ballot would start invalid.
+    for (let n = 1; n <= 12; n++) {
+      const teammates = Array.from({ length: n }, (_, i) => i + 2);
+      const split = evenSplit(teammates);
+      for (const [idx, points] of Object.entries(split)) {
+        expect(
+          needsJustification(points, n),
+          `team size ${n}: default of ${points} for #${idx} would need a justification`,
+        ).toBe(false);
+      }
+    }
+  });
+
+  it("opens the form in a state that already validates", () => {
+    for (let n = 2; n <= 8; n++) {
+      const teammates = Array.from({ length: n }, (_, i) => i + 2);
+      const problems = validatePeerEval(
+        answers({ points: evenSplit(teammates) }),
+        teammates,
+        CONFIG,
+      );
+      expect(problems, `team size ${n}`).toEqual([]);
+    }
   });
 });

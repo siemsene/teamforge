@@ -22,7 +22,16 @@ export interface EvalValidationConfig {
   deadband?: number;
 }
 
-/** The inclusive point range that needs no justification, for one teammate. */
+/**
+ * The inclusive point range that needs no justification, for one teammate.
+ *
+ * Widened where necessary to admit the even split itself. On a large team the
+ * band in whole points can be narrower than the rounding it has to tolerate:
+ * with 11 teammates the neutral share is 9.09, so a relative dead band gives
+ * 9-9, yet 100 does not divide by 11 and somebody must receive 10. Without the
+ * floor/ceil guard the form would open demanding a justification for an
+ * allocation the student never chose.
+ */
 export function neutralRange(
   teammateCount: number,
   deadband: number = DEFAULT_FACTOR_PARAMS.deadband,
@@ -30,9 +39,28 @@ export function neutralRange(
   const neutral = neutralShare(teammateCount + 1);
   return {
     neutral,
-    low: Math.ceil(neutral * (1 - deadband) - 1e-9),
-    high: Math.floor(neutral * (1 + deadband) + 1e-9),
+    low: Math.min(Math.floor(neutral), Math.ceil(neutral * (1 - deadband) - 1e-9)),
+    high: Math.max(Math.ceil(neutral), Math.floor(neutral * (1 + deadband) + 1e-9)),
   };
+}
+
+/**
+ * The even split of 100 points, handing the remainder out one point at a time.
+ *
+ * This is what the form opens on, so it must never itself fall outside the
+ * dead band — a form that demanded a justification for its own default would
+ * be absurd. `tests/evalValidation.test.ts` pins that across team sizes.
+ */
+export function evenSplit(teammateCodeIndexes: number[]): Record<string, number> {
+  const each = Math.floor(100 / teammateCodeIndexes.length);
+  let remainder = 100 - each * teammateCodeIndexes.length;
+  const out: Record<string, number> = {};
+  for (const idx of teammateCodeIndexes) {
+    const bump = remainder > 0 ? 1 : 0;
+    remainder -= bump;
+    out[String(idx)] = each + bump;
+  }
+  return out;
 }
 
 /** True when the dead band leaves any room to deviate without explaining. */
