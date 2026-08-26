@@ -3,6 +3,7 @@ import {
   justificationApplies,
   needsJustification,
   neutralRange,
+  pruneJustifications,
   validatePeerEval,
 } from "../src/lib/evalValidation";
 import type { PeerEvalAnswers } from "../src/types";
@@ -150,5 +151,93 @@ describe("validatePeerEval", () => {
       behaviorRatings: { "2": [0, 2, 3, 4], "3": [5, 5, 5, 6], "4": [3, 3, 3, 3], "5": [4, 4, 4, 4] },
     });
     expect(validatePeerEval(outOfRange, teammates, BEHAVIOR_CONFIG).join(" ")).toMatch(/1 to 5/);
+  });
+});
+
+describe("pruneJustifications", () => {
+  const teammates = [2, 3, 4, 5]; // neutral 25, band 23..27
+
+  it("drops text left behind when an allocation moves back inside the band", () => {
+    // The regression: a student writes a justification for 20, then revises to
+    // 25. The field disappears from the form but the sentence was still
+    // submitted, and showed up in the instructor's detail CSV as though it
+    // described the final answer.
+    const pruned = pruneJustifications(
+      { "2": 25, "3": 25, "4": 25, "5": 25 },
+      { "2": "Missed every meeting." },
+      teammates,
+    );
+    expect(pruned).toEqual({});
+  });
+
+  it("keeps the justification an out-of-band allocation still needs", () => {
+    const pruned = pruneJustifications(
+      { "2": 20, "3": 27, "4": 27, "5": 26 },
+      { "2": "Missed every meeting." },
+      teammates,
+    );
+    expect(pruned).toEqual({ "2": "Missed every meeting." });
+  });
+
+  it("prunes per teammate, not all-or-nothing", () => {
+    const pruned = pruneJustifications(
+      { "2": 10, "3": 40, "4": 25, "5": 25 },
+      { "2": "Did nothing.", "3": "Did everything.", "4": "stale", "5": "  " },
+      teammates,
+    );
+    expect(pruned).toEqual({ "2": "Did nothing.", "3": "Did everything." });
+  });
+
+  it("trims surrounding whitespace and drops blank text", () => {
+    const pruned = pruneJustifications(
+      { "2": 20, "3": 27, "4": 27, "5": 26 },
+      { "2": "  Carried by the team.  ", "3": "   " },
+      teammates,
+    );
+    expect(pruned).toEqual({ "2": "Carried by the team." });
+  });
+
+  it("respects a session-configured dead band", () => {
+    const points = { "2": 20, "3": 27, "4": 27, "5": 26 };
+    const j = { "2": "Below the default band." };
+    expect(pruneJustifications(points, j, teammates, 0.08)).toEqual(j);
+    // A wider band makes 20 unremarkable, so the sentence is no longer needed.
+    expect(pruneJustifications(points, j, teammates, 0.25)).toEqual({});
+  });
+
+  it("ignores entries for anyone who is not a teammate", () => {
+    const pruned = pruneJustifications(
+      { "2": 10, "3": 30, "4": 30, "5": 30 },
+      { "2": "Kept.", "9": "Not on this team." },
+      teammates,
+    );
+    expect(pruned).toEqual({ "2": "Kept." });
+  });
+
+  it("leaves a validated submission untouched", () => {
+    // Whatever survives pruning must still satisfy the validator, or a student
+    // could be blocked by a field the form no longer shows them.
+    const points = { "2": 20, "3": 27, "4": 27, "5": 26 };
+    const justifications = pruneJustifications(points, { "2": "Absent throughout." }, teammates);
+    expect(justifications).toEqual({ "2": "Absent throughout." });
+    expect(
+      validatePeerEval(answers({ points, justifications }), teammates, CONFIG),
+    ).toEqual([]);
+  });
+
+  it("a deep cut pulls everyone else out of the band too", () => {
+    // Not a quirk — the 100 points have to land somewhere. Taking 15 off one
+    // teammate lifts the other three to 30, past the band, so every allocation
+    // on the ballot now needs a sentence. That is the friction a group has to
+    // accept before they can agree to mark somebody down.
+    const points = { "2": 10, "3": 30, "4": 30, "5": 30 };
+    const problems = validatePeerEval(answers({ points }), teammates, CONFIG);
+    expect(problems).toHaveLength(4);
+    expect(pruneJustifications(points, { "2": "a", "3": "b", "4": "c", "5": "d" }, teammates)).toEqual({
+      "2": "a",
+      "3": "b",
+      "4": "c",
+      "5": "d",
+    });
   });
 });

@@ -1,5 +1,10 @@
 import { useMemo, useState } from "react";
-import { needsJustification, neutralRange, validatePeerEval } from "../../lib/evalValidation";
+import {
+  needsJustification,
+  neutralRange,
+  pruneJustifications,
+  validatePeerEval,
+} from "../../lib/evalValidation";
 import type { EvalRoundId, Nicknames, PeerEvalAnswers, PublicTeamMgmt, RosterInfo } from "../../types";
 import { displayName } from "../../lib/nicknames";
 import { Button, ErrorText, Input, Select, TextArea } from "../../components/ui";
@@ -61,7 +66,14 @@ export function PeerEvalForm({
       raterCodeIndex: roster.codeIndex,
       teamLabel: roster.teamLabel,
       points: pts,
-      justifications,
+      // Drop anything left over from an earlier edit: a justification only
+      // belongs with an allocation that still sits outside the dead band.
+      justifications: pruneJustifications(
+        pts,
+        justifications,
+        teammates.map((t) => t.codeIndex),
+        tm.deadband,
+      ),
     };
     if (tm.includeBehaviors) answers.behaviorRatings = behaviors;
     if (comment.trim()) answers.commentToInstructor = comment.trim();

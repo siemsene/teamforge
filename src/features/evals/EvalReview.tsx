@@ -3,9 +3,10 @@ import { useSession } from "../sessions/SessionContext";
 import { getTeamByTokenHash, getTeamDirectoryDoc, publishEvalResults, saveTeamMgmt } from "../../lib/db";
 import { eciesDecrypt, fromBase64 } from "../../lib/crypto";
 import { importMemberKey, sealEnvelope } from "../../lib/memberKey";
-import { displayName, openDirectoryNicknames } from "../../lib/nicknames";
+import { openDirectoryNicknames } from "../../lib/nicknames";
 import { publicTeamMgmt } from "../teams/contractTemplate";
 import { downloadFile, sessionFilename, toCsv } from "../../lib/util";
+import { buildDetailRows, buildSummaryRows } from "../../lib/evalExport";
 import {
   LOW_FACTOR_FLAG,
   computeTeamFactors,
@@ -93,71 +94,22 @@ export function EvalReview() {
 
   function exportCsv() {
     if (!decrypted || !results) return;
-    const nicknames = decrypted.nicknames;
-    const behaviorCols = tm.includeBehaviors ? tm.behaviors.map((_, i) => `behaviorAvg${i + 1}`) : [];
-    const header = [
-      "team",
-      "student",
-      "codeIndex",
-      "raterCount",
-      "imputedCount",
-      "neutral",
-      "share",
-      "trimmedLow",
-      "trimmedHigh",
-      "factor",
-      "teamMean",
-      "flag",
-      ...behaviorCols,
-    ];
-    const rows: (string | number)[][] = [header];
-    for (const { factors } of results) {
-      for (const m of factors.members) {
-        rows.push([
-          factors.teamLabel,
-          displayName(m.codeIndex, nicknames),
-          m.codeIndex,
-          m.raterCount,
-          m.imputedCount,
-          m.neutralShare.toFixed(2),
-          m.share.toFixed(4),
-          m.trimmedLow?.toFixed(4) ?? "",
-          m.trimmedHigh?.toFixed(4) ?? "",
-          m.factor.toFixed(4),
-          factors.teamMean.toFixed(4),
-          [...m.flags, factors.spreadFlagged ? "teamSpread" : ""].filter(Boolean).join("|"),
-          ...(tm.includeBehaviors ? (m.behaviorAverages ?? tm.behaviors.map(() => "")).map((v) => (typeof v === "number" ? v.toFixed(2) : "")) : []),
-        ]);
-      }
-    }
+    const { nicknames, directory, byRater, round } = decrypted;
+
     downloadFile(
-      sessionFilename(session.title, sid, `peer-eval-${decrypted.round}.csv`),
-      toCsv(rows),
+      sessionFilename(session.title, sid, `peer-eval-${round}.csv`),
+      toCsv(
+        buildSummaryRows(results, nicknames, {
+          includeBehaviors: tm.includeBehaviors,
+          behaviors: tm.behaviors,
+        }),
+      ),
       "text/csv",
     );
 
-    // Detail CSV: raw allocations and justifications, one row per (rater, ratee).
-    const detail: (string | number)[][] = [["team", "rater", "ratee", "points", "justification", "comment"]];
-    for (const team of decrypted.directory.teams) {
-      for (const rater of team.members) {
-        const ans = decrypted.byRater.get(rater.codeHash);
-        if (!ans) continue;
-        for (const ratee of team.members) {
-          if (ratee.codeIndex === rater.codeIndex) continue;
-          detail.push([
-            team.label,
-            displayName(rater.codeIndex, decrypted.nicknames),
-            displayName(ratee.codeIndex, decrypted.nicknames),
-            ans.points[String(ratee.codeIndex)] ?? "",
-            ans.justifications[String(ratee.codeIndex)] ?? "",
-            ratee.codeIndex === team.members[0].codeIndex ? (ans.commentToInstructor ?? "") : "",
-          ]);
-        }
-      }
-    }
     downloadFile(
-      sessionFilename(session.title, sid, `peer-eval-${decrypted.round}-detail.csv`),
-      toCsv(detail),
+      sessionFilename(session.title, sid, `peer-eval-${round}-detail.csv`),
+      toCsv(buildDetailRows(directory.teams, byRater, nicknames)),
       "text/csv",
     );
   }

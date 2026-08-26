@@ -50,6 +50,35 @@ export function needsJustification(
   return points < low || points > high;
 }
 
+/**
+ * Keeps only the justifications the submitted allocation actually calls for.
+ *
+ * The form renders a justification field only while an allocation sits outside
+ * the dead band, so text attached to an in-band allocation is necessarily
+ * left over from an earlier edit — the student cannot type it in that state.
+ * Without this, revising a number back toward an even split still submitted the
+ * stale sentence, and it surfaced in the instructor's detail CSV as if it
+ * described the final answer.
+ *
+ * Pruning happens at submit rather than on every keystroke so a student who
+ * nudges a value in and out of the band does not lose what they wrote.
+ */
+export function pruneJustifications(
+  points: Record<string, number>,
+  justifications: Record<string, string>,
+  teammateCodeIndexes: number[],
+  deadband: number = DEFAULT_FACTOR_PARAMS.deadband,
+): Record<string, string> {
+  const kept: Record<string, string> = {};
+  for (const idx of teammateCodeIndexes) {
+    const key = String(idx);
+    const text = justifications[key]?.trim();
+    if (!text) continue;
+    if (needsJustification(points[key], teammateCodeIndexes.length, deadband)) kept[key] = text;
+  }
+  return kept;
+}
+
 /** Returns a list of human-readable problems; empty means the form is valid. */
 export function validatePeerEval(
   answers: PeerEvalAnswers,
