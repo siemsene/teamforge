@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { getStudentByHash, getTeamByTokenHash, setNickname } from "../../lib/db";
 import { deriveMemberKey, deriveTeamKey, hashTeamToken, openEnvelope } from "../../lib/memberKey";
 import { displayName, openNicknames, sealNickname } from "../../lib/nicknames";
-import type { Nicknames, PublicConfig, RosterInfo, StudentDoc, TeamDoc } from "../../types";
+import type { EvalRoundId, Nicknames, PublicConfig, RosterInfo, StudentDoc, TeamDoc } from "../../types";
 import { Card, Spinner } from "../../components/ui";
 import { SurveyStageCard } from "./SurveyStageCard";
 import { ContractEditor } from "./ContractEditor";
@@ -104,6 +104,28 @@ export function StudentHub({
 
   const tm = config.teamMgmt!;
 
+  // An open round is the reason the student logged in, so it goes above the
+  // team roster and the contract editor rather than below them. Closed rounds,
+  // and pending ones carrying a note, stay further down where they were —
+  // there is nothing to do in them.
+  const ROUNDS: EvalRoundId[] = ["formative", "summative"];
+  const evalCard = (round: EvalRoundId) =>
+    roster && (
+      <PeerEvalCard
+        key={round}
+        sid={sid}
+        config={config}
+        hash={hash}
+        roster={roster}
+        nicknames={nicknames}
+        round={round}
+        submission={(round === "formative" ? current.peerEvalFormative : current.peerEvalSummative) ?? null}
+        onChanged={refresh}
+      />
+    );
+  const openRounds = ROUNDS.filter((r) => tm.rounds[r].status === "open");
+  const laterRounds = ROUNDS.filter((r) => tm.rounds[r].status !== "open");
+
   return (
     <div className="space-y-4">
       <Card>
@@ -141,6 +163,8 @@ export function StudentHub({
             />
           )}
 
+          {openRounds.map(evalCard)}
+
           <Card>
             <h2 className="mb-1 font-semibold">Your team — {roster.teamLabel}</h2>
             <ul className="text-sm text-slate-700">
@@ -166,26 +190,7 @@ export function StudentHub({
             />
           )}
 
-          <PeerEvalCard
-            sid={sid}
-            config={config}
-            hash={hash}
-            roster={roster}
-            nicknames={nicknames}
-            round="formative"
-            submission={current.peerEvalFormative ?? null}
-            onChanged={refresh}
-          />
-          <PeerEvalCard
-            sid={sid}
-            config={config}
-            hash={hash}
-            roster={roster}
-            nicknames={nicknames}
-            round="summative"
-            submission={current.peerEvalSummative ?? null}
-            onChanged={refresh}
-          />
+          {laterRounds.map(evalCard)}
 
           {memberKey && tm.rounds.formative.resultsPublished && current.resultFormative && (
             <FormativeResults memberKey={memberKey} envelope={current.resultFormative} />
