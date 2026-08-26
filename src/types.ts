@@ -281,6 +281,13 @@ export interface EvalResultView {
   adjustedMeanPoints?: number | null;
   factor: number;
   behaviorAverages?: number[];
+  /** Behaviour labels as they stood when this result was published, so later
+   * edits to the list cannot silently re-label results already sent out. */
+  behaviors?: string[];
+  /** The caps applied to this result, so the student can see where they sit
+   * within the range rather than being handed a bare number. */
+  factorFloor?: number;
+  factorCeiling?: number;
   note?: string;
 }
 

@@ -165,6 +165,23 @@ export function StudentHub({
 
           {openRounds.map(evalCard)}
 
+          {/* Published results are the other reason a student logs in, so they
+              sit with the open round rather than below the contract editor. */}
+          {memberKey && tm.rounds.formative.resultsPublished && current.resultFormative && (
+            <FormativeResults
+              memberKey={memberKey}
+              envelope={current.resultFormative}
+              behaviors={tm.behaviors}
+            />
+          )}
+          {memberKey && tm.rounds.summative.resultsPublished && current.resultSummative && (
+            <FormativeResults
+              memberKey={memberKey}
+              envelope={current.resultSummative}
+              behaviors={tm.behaviors}
+            />
+          )}
+
           <Card>
             <h2 className="mb-1 font-semibold">Your team — {roster.teamLabel}</h2>
             <ul className="text-sm text-slate-700">
@@ -191,13 +208,6 @@ export function StudentHub({
           )}
 
           {laterRounds.map(evalCard)}
-
-          {memberKey && tm.rounds.formative.resultsPublished && current.resultFormative && (
-            <FormativeResults memberKey={memberKey} envelope={current.resultFormative} />
-          )}
-          {memberKey && tm.rounds.summative.resultsPublished && current.resultSummative && (
-            <FormativeResults memberKey={memberKey} envelope={current.resultSummative} />
-          )}
         </>
       )}
 

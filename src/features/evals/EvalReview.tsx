@@ -116,6 +116,7 @@ export function EvalReview() {
 
   async function publish() {
     if (!decrypted || !results) return;
+    const publishParams = resolveFactorParams(tm);
     setBusy(true);
     setError("");
     setInfo("");
@@ -140,6 +141,9 @@ export function EvalReview() {
             share: m.raterCount >= 3 ? m.share : null,
             factor: m.factor,
             behaviorAverages: m.raterCount >= 3 && m.behaviorAverages ? m.behaviorAverages : undefined,
+            behaviors: m.raterCount >= 3 && m.behaviorAverages ? tm.behaviors : undefined,
+            factorFloor: publishParams.factorFloor,
+            factorCeiling: publishParams.factorCeiling,
             note:
               m.factor < LOW_FACTOR_FLAG
                 ? "Your instructor will follow up before any grade is issued — nothing is finalized from this alone."
