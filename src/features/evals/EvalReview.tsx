@@ -28,12 +28,24 @@ export function EvalReview() {
   const { sid, session, students, sessionKey, setSessionKey } = useSession();
   const tm = session.teamMgmt!;
   const [round, setRound] = useState<EvalRoundId>("formative");
-  const [decrypted, setDecrypted] = useState<{
-    round: EvalRoundId;
-    directory: TeamDirectory;
-    byRater: Map<string, PeerEvalAnswers>;
-    nicknames: Nicknames;
-  } | null>(null);
+  // Kept per round, so flipping between Practice and Graded does not throw away
+  // work already done. Deliberately not persisted: these are decrypted
+  // evaluations, and they should live no longer than this screen.
+  const [byRound, setByRound] = useState<
+    Partial<
+      Record<
+        EvalRoundId,
+        {
+          directory: TeamDirectory;
+          byRater: Map<string, PeerEvalAnswers>;
+          nicknames: Nicknames;
+          /** Submissions at the moment this was computed, to spot staleness. */
+          computedFrom: number;
+        }
+      >
+    >
+  >({});
+  const decrypted = byRound[round] ?? null;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [info, setInfo] = useState("");
@@ -67,7 +79,10 @@ export function EvalReview() {
       const nicknames = await openDirectoryNicknames(sid, directory.teams, (tokenHash) =>
         getTeamByTokenHash(sid, tokenHash),
       );
-      setDecrypted({ round, directory, byRater, nicknames });
+      setByRound((prev) => ({
+        ...prev,
+        [round]: { directory, byRater, nicknames, computedFrom: submittedHashes.size },
+      }));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -94,7 +109,7 @@ export function EvalReview() {
 
   function exportCsv() {
     if (!decrypted || !results) return;
-    const { nicknames, directory, byRater, round } = decrypted;
+    const { nicknames, directory, byRater } = decrypted;
 
     downloadFile(
       sessionFilename(session.title, sid, `peer-eval-${round}.csv`),
@@ -132,7 +147,7 @@ export function EvalReview() {
           const rawB64 = decrypted.directory.memberKeys[member.codeHash];
           if (!rawB64) continue;
           const view: EvalResultView = {
-            round: decrypted.round,
+            round: round,
             teamLabel: team.label,
             raterCount: m.raterCount,
             neutralShare: m.neutralShare,
@@ -153,13 +168,13 @@ export function EvalReview() {
           patches.push({ hash: member.codeHash, result: await sealEnvelope(key, JSON.stringify(view)) });
         }
       }
-      await publishEvalResults(sid, decrypted.round, patches);
+      await publishEvalResults(sid, round, patches);
       // Mark results as published in the config so students' cards reveal them.
       const next = {
         ...tm,
         rounds: {
           ...tm.rounds,
-          [decrypted.round]: { ...tm.rounds[decrypted.round], resultsPublishedAt: Date.now() },
+          [round]: { ...tm.rounds[round], resultsPublishedAt: Date.now() },
         },
       };
       await saveTeamMgmt(sid, next, publicTeamMgmt(next));
@@ -183,10 +198,7 @@ export function EvalReview() {
             <Button
               key={r}
               variant={round === r ? "primary" : "secondary"}
-              onClick={() => {
-                setRound(r);
-                setDecrypted(null);
-              }}
+              onClick={() => setRound(r)}
             >
               {r === "formative" ? "Practice" : "Graded"}
             </Button>
@@ -222,9 +234,9 @@ export function EvalReview() {
         <>
           <div className="flex flex-wrap gap-2">
             <Button onClick={review} disabled={busy}>
-              {busy ? "Working…" : decrypted?.round === round ? "Recompute" : "Compute factors"}
+              {busy ? "Working…" : decrypted ? "Recompute" : "Compute factors"}
             </Button>
-            {decrypted?.round === round && (
+            {decrypted && (
               <>
                 <Button variant="secondary" onClick={exportCsv}>
                   Export CSV
@@ -237,8 +249,23 @@ export function EvalReview() {
           </div>
           <ErrorText>{error}</ErrorText>
           {info && <p className="mt-2 text-sm text-green-700">{info}</p>}
-          {decrypted?.round === round && results && (
-            <FactorTable results={results} nicknames={decrypted.nicknames} />
+          {decrypted && results ? (
+            <>
+              {decrypted.computedFrom !== submitted && (
+                <p className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-2 text-sm text-amber-900">
+                  {submitted > decrypted.computedFrom
+                    ? `${submitted - decrypted.computedFrom} more student${submitted - decrypted.computedFrom === 1 ? " has" : "s have"} submitted since you computed these.`
+                    : `${decrypted.computedFrom - submitted} submission${decrypted.computedFrom - submitted === 1 ? " has" : "s have"} been withdrawn since you computed these.`}{" "}
+                  Recompute to bring them up to date.
+                </p>
+              )}
+              <FactorTable results={results} nicknames={decrypted.nicknames} />
+            </>
+          ) : (
+            <p className="mt-3 text-sm text-slate-600">
+              Factors are worked out in your browser from the encrypted submissions and are never stored, so they are
+              not kept between visits — computing them again takes one click and changes nothing.
+            </p>
           )}
         </>
       )}
