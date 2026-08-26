@@ -103,7 +103,8 @@ After allocation, an instructor may enable a **Team management** phase on the sa
 
 AI feedback runs through a small **Cloudflare Worker** in [`worker/`](worker/) that holds the Anthropic API key as a secret — necessary because the app itself has no server. Deploy it (see [`worker/README.md`](worker/README.md)), then:
 
-- set `VITE_AI_PROXY_URL` in `.env.local` to the worker URL, and
+- set `VITE_AI_PROXY_URL` in `.env.local` to the worker URL,
+- list every origin you serve the app from in the worker's `ALLOWED_ORIGINS` (a custom domain **and** the Firebase defaults — the browser sends whichever the student loaded, and the worker rejects the rest both in CORS headers and server-side), and
 - add that origin to the `connect-src` directive of the Content-Security-Policy in `firebase.json` (the default already allows `https://*.workers.dev`; change it if you use a custom domain), then rebuild and redeploy.
 
 ### A note on the Content-Security-Policy

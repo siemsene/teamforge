@@ -16,7 +16,10 @@ import {
 export interface Env {
   ANTHROPIC_API_KEY: string;
   RATE_KV: KVNamespace;
-  ALLOWED_ORIGIN: string;
+  /** Comma-separated list of origins allowed to call this worker. */
+  ALLOWED_ORIGINS?: string;
+  /** Legacy single-origin form, still honoured. */
+  ALLOWED_ORIGIN?: string;
   MODEL?: string;
   DAILY_CAP?: string;
   HOURLY_PER_IP?: string;
@@ -51,20 +54,54 @@ const FEEDBACK_SCHEMA = {
   },
 } as const;
 
-function corsHeaders(env: Env): Record<string, string> {
-  return {
-    "Access-Control-Allow-Origin": env.ALLOWED_ORIGIN,
+/**
+ * Origins allowed to call this worker.
+ *
+ * A list rather than a single value because one deployment is reachable under
+ * several names — a custom domain plus the Firebase defaults — and a browser
+ * sends whichever the student actually loaded. ALLOWED_ORIGIN (singular) is the
+ * older form and still works.
+ */
+export function allowedOrigins(env: Env): string[] {
+  const raw = env.ALLOWED_ORIGINS ?? env.ALLOWED_ORIGIN ?? "";
+  return raw
+    .split(",")
+    .map((o) => o.trim())
+    .filter(Boolean);
+}
+
+export function isAllowedOrigin(env: Env, origin: string | null): origin is string {
+  return origin !== null && allowedOrigins(env).includes(origin);
+}
+
+/**
+ * Access-Control-Allow-Origin cannot carry a list and must echo the caller's
+ * own origin. An origin that is not on the list gets no allow header at all,
+ * so the browser blocks it — matching the server-side rejection below rather
+ * than quietly contradicting it.
+ */
+export function corsHeaders(env: Env, origin: string | null): Record<string, string> {
+  const headers: Record<string, string> = {
     "Access-Control-Allow-Methods": "POST, OPTIONS",
     "Access-Control-Allow-Headers": "content-type",
     "Access-Control-Max-Age": "86400",
+    // Responses differ by origin, so they must never be cached across origins.
     Vary: "Origin",
   };
+  if (isAllowedOrigin(env, origin)) headers["Access-Control-Allow-Origin"] = origin;
+  return headers;
 }
 
-function json(body: unknown, status: number, env: Env, extra: Record<string, string> = {}): Response {
+function json(
+  body: unknown,
+  status: number,
+  env: Env,
+  origin: string | null,
+  extra: Record<string, string> = {},
+): Response {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { "content-type": "application/json", ...corsHeaders(env), ...extra },
+    headers: { "content-type": "application/json", ...corsHeaders(env, origin), ...extra },
   });
 }
 
@@ -121,46 +158,47 @@ async function generateFeedback(env: Env, req: FeedbackRequest): Promise<unknown
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
+    const origin = request.headers.get("origin");
     if (request.method === "OPTIONS") {
-      return new Response(null, { status: 204, headers: corsHeaders(env) });
+      return new Response(null, { status: 204, headers: corsHeaders(env, origin) });
     }
     const url = new URL(request.url);
     if (request.method !== "POST" || url.pathname !== "/v1/feedback") {
-      return json({ error: "Not found." }, 404, env);
+      return json({ error: "Not found." }, 404, env, origin);
     }
 
     // CORS headers only constrain browsers; also enforce the origin server-side
     // so scripts can't spend the API key. The app always sends Origin on this
-    // cross-origin POST, so requiring an exact match rejects direct clients.
-    if (request.headers.get("origin") !== env.ALLOWED_ORIGIN) {
-      return json({ error: "Forbidden origin." }, 403, env);
+    // cross-origin POST, so requiring a listed match rejects direct clients.
+    if (!isAllowedOrigin(env, origin)) {
+      return json({ error: "Forbidden origin." }, 403, env, origin);
     }
 
     let body: unknown;
     try {
       body = await request.json();
     } catch {
-      return json({ error: "Invalid JSON." }, 400, env);
+      return json({ error: "Invalid JSON." }, 400, env, origin);
     }
     const validated = validateFeedbackRequest(body);
-    if (!validated.ok) return json({ error: validated.error }, validated.status, env);
+    if (!validated.ok) return json({ error: validated.error }, validated.status, env, origin);
 
     const ip = request.headers.get("cf-connecting-ip") ?? "unknown";
     const now = new Date();
     const limit = await checkAndBumpLimits(env, ip, now);
     if (!limit.ok) {
-      return json({ error: "Rate limit reached. Please try again later." }, 429, env, {
+      return json({ error: "Rate limit reached. Please try again later." }, 429, env, origin, {
         "retry-after": String(limit.retryAfter ?? 3600),
       });
     }
 
     try {
       const feedback = await generateFeedback(env, validated.data);
-      return json(feedback, 200, env);
+      return json(feedback, 200, env, origin);
     } catch (e) {
       // Never echo the request; log only a generic message server-side.
       console.error("feedback generation failed:", e instanceof Error ? e.message : "unknown");
-      return json({ error: "Could not generate feedback right now." }, 502, env);
+      return json({ error: "Could not generate feedback right now." }, 502, env, origin);
     }
   },
 };

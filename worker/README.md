@@ -10,7 +10,7 @@ The worker:
 - validates and rate-limits (per-IP hourly + global daily, via Workers KV),
 - calls Claude with a fixed coaching system prompt and a JSON-schema structured
   output, and returns `{ overall, sections: [{ id, strengths, risks, suggestions }] }`,
-- allows only your app's origin (CORS) and never logs request bodies.
+- allows only your app's origins (CORS) and never logs request bodies.
 
 No names or identifiers are sent — the app instructs teams not to include names,
 and this is the one point where contract text leaves the app's end-to-end
@@ -31,7 +31,8 @@ npx wrangler kv namespace create RATE_KV
 #    Use a dedicated key with a spend limit set in the Anthropic console.
 npx wrangler secret put ANTHROPIC_API_KEY
 
-# 3. Set ALLOWED_ORIGIN in wrangler.toml to your app's origin, then deploy.
+# 3. Set ALLOWED_ORIGINS in wrangler.toml to every origin you serve the app
+#    from (comma-separated), then deploy.
 npx wrangler deploy
 ```
 
@@ -45,7 +46,7 @@ npx wrangler deploy
    VITE_AI_PROXY_URL=https://teamforge-ai.<account>.workers.dev
    ```
 
-2. Add the same origin to the app's Content-Security-Policy `connect-src` in
+2. Add the worker's own origin to the app's Content-Security-Policy `connect-src` in
    `firebase.json`, then rebuild and redeploy the app.
 
 3. In a session's **Peer evals → settings**, keep "Offer AI contract feedback"
@@ -56,7 +57,7 @@ npx wrangler deploy
 
 | Var             | Default            | Meaning                                  |
 | --------------- | ------------------ | ---------------------------------------- |
-| `ALLOWED_ORIGIN`| —                  | The only origin allowed to call it (CORS)|
+| `ALLOWED_ORIGINS`| —                 | Comma-separated origins allowed to call it (CORS + server-side). `ALLOWED_ORIGIN` singular still works. |
 | `MODEL`         | `claude-sonnet-5`  | Claude model used for feedback           |
 | `HOURLY_PER_IP` | `10`               | Max requests per IP per hour             |
 | `DAILY_CAP`     | `500`              | Global max requests per day              |
@@ -67,3 +68,19 @@ npx wrangler deploy
 npx wrangler dev   # serves on http://localhost:8787
 npm test           # runs the pure validation / rate-limit unit tests
 ```
+
+## If the app gets a CORS error
+
+```
+Response to preflight request doesn't pass access control check: The
+'Access-Control-Allow-Origin' header has a value 'https://…' that is not
+equal to the supplied origin.
+```
+
+The browser sends whichever host the student actually loaded, and one
+deployment usually answers to several: a custom domain plus the Firebase
+defaults (`*.web.app`, `*.firebaseapp.com`). Every one you serve from must be
+listed in `ALLOWED_ORIGINS`, or requests from the others are rejected — the
+worker enforces the same list server-side, so this is not merely a browser
+formality. Add the missing origin and redeploy the worker; the app itself does
+not need rebuilding.

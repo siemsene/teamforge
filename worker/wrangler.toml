@@ -3,10 +3,13 @@ main = "src/index.ts"
 compatibility_date = "2026-01-01"
 compatibility_flags = ["nodejs_compat"]
 
-# The origin allowed to call this worker (your deployed app). Must match the
-# host you serve TeamForge from; the worker rejects all other origins (CORS).
+# Origins allowed to call this worker, comma-separated. One deployment is
+# reachable under several names -- a custom domain plus the two Firebase
+# defaults -- and the browser sends whichever the student actually loaded, so
+# every host you serve TeamForge from must be listed here. The worker rejects
+# all others, both in CORS headers and server-side.
 [vars]
-ALLOWED_ORIGIN = "https://teamforge-b1fa9.web.app"
+ALLOWED_ORIGINS = "https://teamforge.edutool.org,https://teamforge-b1fa9.web.app,https://teamforge-b1fa9.firebaseapp.com"
 MODEL = "claude-sonnet-5"
 DAILY_CAP = "500"
 HOURLY_PER_IP = "10"
