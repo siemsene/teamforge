@@ -136,6 +136,7 @@ bullets(
     "Set constraints — choose which rules matter and how strongly (Must / Important / Nice to have).",
     "Open the survey — students log in with a private code, see a share code, and submit encrypted answers.",
     "Close and allocate — unlock with your passphrase, run the optimizer, adjust teams, export the roster.",
+    "Team management (optional) — keep the session going after allocation to run team contracts and two rounds of peer evaluations (see §11).",
     "Erase — purge student data once teams are final.",
   ],
   { numbered: true },
@@ -143,7 +144,8 @@ bullets(
 note(
   "Tabs you will use",
   "Inside a session: Overview (status, invite text, delete) · Projects · Survey · Constraints · Responses (completion) · " +
-    "Allocation (optimize & export) · Privacy & data (erase). A “Projects” tab appears only for sessions with named projects.",
+    "Allocation (optimize & export) · Privacy & data (erase). A “Projects” tab appears only for sessions with named projects; " +
+    "“Teams” and “Peer evals” tabs appear once you enable the optional team-management phase (§11).",
 );
 
 // ----------------------------------------------------------------------------
@@ -363,7 +365,7 @@ bullets([
 h3("Peer evaluations");
 bullets([
   "Two rounds: a practice (formative) round whose results you can return privately, and a graded (summative) round. Open and close each round on the Peer evals tab.",
-  "The form is fixed: allocate 100 points across teammates (an equal split is legitimate), rate four behaviors 1–5 (optional), and an optional confidential comment to you.",
+  "The form is fixed: allocate 100 points across teammates (an equal split is legitimate; an allocation below 15 or above 40 needs a one-sentence justification, waived on teams so small the equal split itself falls outside that range), rate four behaviors 1–5 (required unless you untick “Include behavior ratings” in the Peer evals settings), and an optional confidential comment to you.",
   "Watch completion by code number, then unlock to compute each student's team factor. The factor multiplies the team-scored part of a grade: neutral is an equal split (100 ÷ raters), a farthest-from-median rating is discarded on teams of five or more, the proportional gap is halved, and the result is clamped (default 0.80–1.10).",
   "Factors below 0.90, or teams whose factors spread by more than 0.25, are flagged for your attention before any grade is issued. Export summary and detail CSVs, and optionally publish each student's own factor back to them privately.",
 ]);
