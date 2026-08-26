@@ -9,6 +9,7 @@ import { Badge, Button, Card, ErrorText, Spinner } from "../../components/ui";
 import { UnlockPanel } from "../sessions/UnlockPanel";
 import { RosterImport } from "./RosterImport";
 import { ContractPrint } from "./ContractPrint";
+import { contractPdfName, printAs } from "../../lib/printPdf";
 import { EmailTemplateCard } from "../../components/EmailTemplateCard";
 import { contractEmail, emailContext } from "./emailTemplates";
 import { CONTRACT_SECTIONS, publicTeamMgmt } from "./contractTemplate";
@@ -190,9 +191,10 @@ function ContractReview({
                     : `#${m.codeIndex} (no display name yet)`,
                 )}
                 readContract={readContract}
-                onPrint={(content) =>
-                  setPrinting({ label: t.teamLabel, content, finalizedAt: t.contract.finalizedAt })
-                }
+                onPrint={(content) => {
+                  setPrinting({ label: t.teamLabel, content, finalizedAt: t.contract.finalizedAt });
+                  setTimeout(() => printAs(contractPdfName(sessionTitle, t.teamLabel)), 50);
+                }}
               />
             );
           })}

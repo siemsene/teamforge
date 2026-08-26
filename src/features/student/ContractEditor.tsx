@@ -13,6 +13,7 @@ import type {
 } from "../../types";
 import { Button, Card, ConfirmDialog, ErrorText, Spinner, TextArea } from "../../components/ui";
 import { ContractPrint } from "../teams/ContractPrint";
+import { contractPdfName, printAs } from "../../lib/printPdf";
 
 interface SectionState {
   id: string;
@@ -261,14 +262,21 @@ export function ContractEditor({
         )}
         <Button
           variant="secondary"
+          title="Opens your browser's print dialog — choose 'Save as PDF' as the destination."
           onClick={() => {
             setPrinting(buildContent());
-            setTimeout(() => window.print(), 50);
+            // Let the printable layout render before the dialog opens.
+            setTimeout(() => printAs(contractPdfName(config.title, roster.teamLabel)), 50);
           }}
         >
-          Download PDF
+          Save as PDF
         </Button>
       </div>
+      <p className="mt-2 text-xs text-slate-500">
+        &ldquo;Save as PDF&rdquo; opens your browser&rsquo;s print dialog — choose <em>Save as PDF</em> (or
+        <em> Microsoft Print to PDF</em>) as the destination rather than a printer. The file is named for your course
+        and team.
+      </p>
 
       <ConfirmDialog
         open={confirmAi}
