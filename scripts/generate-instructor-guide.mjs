@@ -354,12 +354,14 @@ p(
     "evaluations. This is entirely optional — if you only need team allocation, ignore this chapter. Enable it from " +
     "the Overview tab once the session is Closed; two new tabs appear, Teams and Peer evals.",
 );
-h3("Uploading the final roster");
+h3("Uploading the login-codes CSV");
 bullets([
-  "Take the login-codes CSV you downloaded when creating the session and add one column: team (any label, e.g. \"Team 1\" or a project name). Teams may differ from the optimizer's output if you adjusted them.",
+  "On the Teams tab, upload the student-codes.csv you downloaded when you created the session — exactly as it is. You do not add a team column: TeamForge reads the teams from the allocation you already saved, matching each row by its login code. Unlock with your passphrase when asked, since the allocation is encrypted.",
+  "Why upload anything at all? Login codes are shown to you once and never stored — the platform keeps only their hashes. Each student's team is sealed under a key derived from their own code, so that code has to come from you. The teams do not: those the app already has.",
+  "Adjusted teams by hand after allocating, or never ran the optimizer? Add a team column (any label, e.g. \"Team 1\" or a project name). Any row that has one overrides the saved allocation; rows left blank still come from it, so you only need to fill in the students you moved.",
   "You do not upload names. If your working sheet already has a name column, leave it — TeamForge shows those names in the on-screen preview so you can confirm you picked the right file, but they never leave your browser.",
-  "On the Teams tab, upload that CSV. Your browser encrypts each student's team membership under a key derived from their own login code, so the platform never stores team membership in plaintext either.",
-  "Students log in with the same code they used for the survey.",
+  "Check the preview before provisioning. It reports how many assignments came from the allocation versus your file, and warns if anyone in the allocation is missing from the CSV — which is what a truncated or stale file looks like.",
+  "Your browser then encrypts each student's team membership under their own key, so the platform never stores team membership in plaintext either. Students log in with the same code they used for the survey.",
 ]);
 
 h3("Display names (students choose their own)");

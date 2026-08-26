@@ -27,9 +27,10 @@ export function TeamsTab() {
           <h2 className="mb-1 font-semibold">Team management</h2>
           <p className="text-sm text-slate-600">
             Optionally continue using this session after allocation: teams write a contract (with AI feedback) and you
-            run peer evaluations. You upload only which team each student is on, sealed under a key derived from their
-            own login code — no names. Each student then picks the display name you and their team will see. Start by
-            uploading the final team roster.
+            run peer evaluations. Teams come from the allocation you already saved — you just re-supply the
+            login-codes CSV, because each student&rsquo;s team is sealed under a key derived from their own code and
+            those codes are never stored. No names are uploaded; each student picks the display name you and their
+            team will see.
           </p>
         </Card>
         <RosterImport existingConfig={session.teamMgmt} />

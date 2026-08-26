@@ -1,11 +1,13 @@
-// Parse and validate the instructor's completed roster CSV for team management.
+// Parse and validate the instructor's roster CSV for team management.
 //
-// The instructor starts from the login-codes CSV downloaded at session
-// creation and adds a team label per row. We accept either the login code or
-// the code index to identify each student, so the instructor can work from
-// whichever column is convenient. Pure module — unit-testable; the caller does
-// the code→hash resolution (async crypto) and cross-checks against the existing
-// student docs.
+// Normally this is the login-codes CSV exactly as downloaded at session
+// creation, with nothing added: the team for each student comes from the saved
+// allocation instead (see allocationTeams.ts). A `team` column is still
+// honoured and overrides the allocation, for an instructor who moved somebody
+// afterwards or never ran the optimizer. We accept either the login code or the
+// code index to identify each student, so either column will do. Pure module —
+// unit-testable; the caller does the code→hash resolution (async crypto) and
+// cross-checks against the existing student docs.
 //
 // A `name` column is tolerated but never uploaded: the instructor's working
 // sheet usually carries names, and it would be hostile to make them strip it.
@@ -22,12 +24,15 @@ export interface RosterRow {
   index: number | null;
   /** Preview only — never sealed into any artifact. Empty when absent. */
   name: string;
+  /** Empty when the file carries no team column; filled from the allocation. */
   team: string;
 }
 
 export interface ParsedRoster {
   rows: RosterRow[];
   problems: string[];
+  /** True when the file supplies its own team labels, overriding the allocation. */
+  hasTeamColumn: boolean;
 }
 
 const norm = (s: string) => s.trim().toLowerCase().replace(/[\s_]+/g, "");
@@ -44,7 +49,7 @@ function findColumn(header: string[], aliases: string[]): number {
 
 export function parseRosterCsv(text: string): ParsedRoster {
   const grid = parseCsv(text);
-  if (grid.length === 0) return { rows: [], problems: ["The file is empty."] };
+  if (grid.length === 0) return { rows: [], problems: ["The file is empty."], hasTeamColumn: false };
 
   const header = grid[0];
   const codeCol = findColumn(header, ["code", "login code", "logincode", "student code"]);
@@ -55,8 +60,7 @@ export function parseRosterCsv(text: string): ParsedRoster {
   const problems: string[] = [];
   if (codeCol < 0 && indexCol < 0)
     problems.push('The file needs a "code" or "index" column to identify each student.');
-  if (teamCol < 0) problems.push('The file needs a "team" column.');
-  if (problems.length > 0) return { rows: [], problems };
+  if (problems.length > 0) return { rows: [], problems, hasTeamColumn: teamCol >= 0 };
 
   const rows: RosterRow[] = [];
   for (let r = 1; r < grid.length; r++) {
@@ -75,10 +79,12 @@ export function parseRosterCsv(text: string): ParsedRoster {
       problems.push(`Row ${r + 1}: index "${indexRaw}" is not a whole number.`);
       continue;
     }
-    if (!team) problems.push(`Row ${r + 1}: missing team.`);
+    // A blank team is normal — the allocation supplies it. Only a row in a file
+    // that does carry team labels, yet leaves this one empty, is worth flagging.
+    if (teamCol >= 0 && !team) problems.push(`Row ${r + 1}: missing team.`);
     rows.push({ code, index, name, team });
   }
-  return { rows, problems };
+  return { rows, problems, hasTeamColumn: teamCol >= 0 };
 }
 
 export interface TeamGroup {

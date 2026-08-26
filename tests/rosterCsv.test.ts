@@ -32,9 +32,39 @@ describe("parseRosterCsv", () => {
     expect(rows[0].name).toBe("Ng, Ana");
   });
 
-  it("flags a missing required column", () => {
-    const { problems } = parseRosterCsv(toCsv([["code", "name"], ["ABCDE-FGHJK", "Ana"]]));
-    expect(problems.join(" ")).toMatch(/needs a "team" column/);
+  it("accepts the codes CSV unchanged, with no team column", () => {
+    // The normal path: teams come from the saved allocation, so the instructor
+    // uploads the file exactly as downloaded rather than hand-merging one.
+    const { rows, problems, hasTeamColumn } = parseRosterCsv(
+      toCsv([
+        ["studentIndex", "loginCode", "shareCode", "surveyLink", "yourStudentName", "yourStudentEmail"],
+        ["1", "ABCDE-FGHJK", "WXYZ", "https://example.test/s/abc", "Ana", "ana@example.test"],
+        ["2", "MNPQR-STVWX", "QRST", "https://example.test/s/abc", "Ben", "ben@example.test"],
+      ]),
+    );
+    expect(problems).toEqual([]);
+    expect(hasTeamColumn).toBe(false);
+    expect(rows).toHaveLength(2);
+    expect(rows.map((r) => r.team)).toEqual(["", ""]);
+    expect(rows.map((r) => r.index)).toEqual([1, 2]);
+    expect(rows[0].code).toBe("ABCDE-FGHJK");
+    expect(rows[0].name).toBe("Ana"); // preview only
+  });
+
+  it("still needs something that identifies each student", () => {
+    const { problems } = parseRosterCsv(toCsv([["name", "team"], ["Ana", "Team 1"]]));
+    expect(problems.join(" ")).toMatch(/needs a "code" or "index" column/);
+  });
+
+  it("reports a blank cell only in a file that does use a team column", () => {
+    const withColumn = parseRosterCsv(
+      toCsv([["code", "team"], ["ABCDE-FGHJK", "Team 1"], ["MNPQR-STVWX", ""]]),
+    );
+    expect(withColumn.hasTeamColumn).toBe(true);
+    expect(withColumn.problems.join(" ")).toMatch(/Row 3: missing team/);
+
+    const withoutColumn = parseRosterCsv(toCsv([["code"], ["ABCDE-FGHJK"]]));
+    expect(withoutColumn.problems).toEqual([]);
   });
 
   it("accepts a file with no name column at all — only team membership matters", () => {
