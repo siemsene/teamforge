@@ -7,13 +7,22 @@
 //   ziso_* siso_* indicator + slack for anti-isolation ("0 or >= 2")
 //   bp_* bm_*     balance deviations
 //   scap_*       slack on capability coverage
+//   scat_*       slack on categorical coverage
+//   galign_* salign_*  chosen answer per team + members outside it
 //   y_*          pair variables rewarding satisfied teammate preferences
 //
 // Objective: minimize the weighted sum of all violations. Hard constraints:
 // every student on exactly one team; team size within [min, max].
 
 import { WEIGHT_VALUES, type NumberQuestion } from "../types";
-import { hasValue, numericAnswer, optionalNumericAnswer, rankedProjects, teammateHashes } from "./answers";
+import {
+  categoryGroups,
+  hasValue,
+  numericAnswer,
+  optionalNumericAnswer,
+  rankedProjects,
+  teammateHashes,
+} from "./answers";
 import type { SolverInput } from "./types";
 
 export interface BuiltModel {
@@ -164,6 +173,54 @@ export function buildModel(input: SolverInput): BuiltModel {
           const members = capable.map(({ i }) => [1, x(i, t)] as [number, string]);
           con(`${terms([...members, [1, slack] as [number, string]])} >= ${c.minCount}`);
         }
+      }
+    }
+
+    if (c.kind === "minCategory") {
+      const holders = students
+        .map((s, i) => ({ s, i }))
+        .filter(({ s }) => hasValue(s.answers[c.questionId], c.value));
+      for (let t = 0; t < nT; t++) {
+        const slack = `scat_${c.id}_${t}`;
+        bounds.push(` 0 <= ${slack} <= ${c.minCount}`);
+        obj.push([W, slack]);
+        if (holders.length === 0) {
+          // Nobody in the class gave this answer: a constant violation, the same
+          // way an unfillable project requirement is handled above.
+          con(`${slack} >= ${c.minCount}`);
+        } else {
+          const members = holders.map(({ i }) => [1, x(i, t)] as [number, string]);
+          con(`${terms([...members, [1, slack] as [number, string]])} >= ${c.minCount}`);
+        }
+      }
+    }
+
+    if (c.kind === "alignCategory") {
+      // Each team picks one answer to settle on (galign) and pays for every
+      // member holding a different one (salign). The solver does the picking,
+      // so no answer is privileged: a team of remote workers is as cheap as a
+      // team of in-person ones.
+      const groups = categoryGroups(students.map((s) => s.answers[c.questionId]));
+      if (groups.size < 2) continue; // one answer (or none) in play: nothing to align
+      const values = [...groups.keys()];
+      for (let t = 0; t < nT; t++) {
+        const M = teams[t].maxSize;
+        const odd = `salign_${c.id}_${t}`;
+        bounds.push(` 0 <= ${odd} <= ${M}`);
+        obj.push([W, odd]);
+        const picks: [number, string][] = [];
+        values.forEach((v, k) => {
+          const g = `galign_${c.id}_${t}_${k}`;
+          binaries.push(g);
+          picks.push([1, g]);
+          const others = values
+            .filter((w) => w !== v)
+            .flatMap((w) => groups.get(w)!.map((i) => [-1, x(i, t)] as [number, string]));
+          // odd >= (members not holding v) - M (1 - g), i.e. the bound only
+          // binds for the answer this team actually settled on.
+          con(`${terms([[1, odd], ...others, [-M, g] as [number, string]])} >= ${-M}`);
+        });
+        con(`${terms(picks)} = 1`);
       }
     }
 

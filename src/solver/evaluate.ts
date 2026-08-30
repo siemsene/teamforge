@@ -3,7 +3,14 @@
 // objective. Returns per-team detail rows for the violations panel.
 
 import { WEIGHT_VALUES, type NumberQuestion } from "../types";
-import { hasValue, numericAnswer, optionalNumericAnswer, rankedProjects, teammateHashes } from "./answers";
+import {
+  categoryGroups,
+  hasValue,
+  numericAnswer,
+  optionalNumericAnswer,
+  rankedProjects,
+  teammateHashes,
+} from "./answers";
 import type { SolverInput, SolverStudent } from "./types";
 
 export interface ViolationDetail {
@@ -137,6 +144,53 @@ export function evaluateAssignment(input: SolverInput, assignment: Record<string
             severity: c.weight,
             penalty: W * shortfall,
           });
+        }
+      }
+    }
+
+    if (c.kind === "minCategory") {
+      const q = questions.find((qq) => qq.id === c.questionId);
+      for (const team of teams) {
+        const count = members.get(team.id)!.filter((s) => hasValue(s.answers[c.questionId], c.value)).length;
+        const shortfall = Math.max(0, c.minCount - count);
+        if (shortfall > 0) {
+          details.push({
+            teamId: team.id,
+            label: `Needs ${c.minCount} student(s) answering "${c.value}" on "${q?.prompt ?? c.questionId}", has ${count}`,
+            severity: c.weight,
+            penalty: W * shortfall,
+          });
+        }
+      }
+    }
+
+    if (c.kind === "alignCategory") {
+      // Mirrors buildModel: the team's best answer is the one most of its
+      // members gave, and everyone else on the team is an odd one out. Students
+      // with no answer are in no group and so cost nothing either way.
+      const q = questions.find((qq) => qq.id === c.questionId);
+      if (categoryGroups(students.map((s) => s.answers[c.questionId])).size >= 2) {
+        for (const team of teams) {
+          const m = members.get(team.id)!;
+          const groups = categoryGroups(m.map((s) => s.answers[c.questionId]));
+          const answered = [...groups.values()].reduce((a, g) => a + g.length, 0);
+          let majority = "";
+          let majoritySize = 0;
+          for (const [v, g] of groups) {
+            if (g.length > majoritySize) {
+              majority = v;
+              majoritySize = g.length;
+            }
+          }
+          const odd = answered - majoritySize;
+          if (odd > 0) {
+            details.push({
+              teamId: team.id,
+              label: `${odd} member(s) not on the team's "${majority}" answer to "${q?.prompt ?? c.questionId}"`,
+              severity: c.weight,
+              penalty: W * odd,
+            });
+          }
         }
       }
     }

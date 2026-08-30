@@ -280,3 +280,202 @@ describe("numeric balance with non-respondents", () => {
     expect(stacked.totalPenalty).toBeGreaterThan(mixed.totalPenalty);
   });
 });
+
+const leadQ: Question = {
+  id: "lead",
+  kind: "single",
+  prompt: "Leadership preference",
+  required: false,
+  options: ["I prefer to lead", "Happy to contribute without leading"],
+};
+const FOLLOWER = "Happy to contribute without leading";
+const workQ: Question = {
+  id: "work",
+  kind: "single",
+  prompt: "Work preference",
+  required: false,
+  options: ["Mostly in person", "Hybrid", "Mostly remote"],
+};
+
+describe("category coverage", () => {
+  const constraint: Constraint = {
+    id: "c1",
+    kind: "minCategory",
+    weight: "must",
+    questionId: "lead",
+    value: "I prefer to lead",
+    minCount: 1,
+  };
+
+  it("spreads the willing leaders so every team has one", async () => {
+    // Two leaders, two teams: the only allocation without a violation puts one
+    // on each. Anti-isolation would have done the opposite and paired them.
+    const students = [
+      student(0, { lead: "I prefer to lead" }),
+      student(1, { lead: "I prefer to lead" }),
+      student(2, { lead: FOLLOWER }),
+      student(3, { lead: FOLLOWER }),
+    ];
+    const input: SolverInput = {
+      students,
+      teams: [team("a", 2, 2), team("b", 2, 2)],
+      idealTeamSize: 2,
+      constraints: [constraint],
+      questions: [leadQ],
+      timeLimitSeconds: 10,
+    };
+    const result = await solve(input);
+    const leadersOnA = result.teams.a.filter((h) => ["hash0", "hash1"].includes(h)).length;
+    expect(leadersOnA).toBe(1);
+    expect(result.objective).toBeLessThan(1);
+  });
+
+  it("charges the weight once per team left without one", () => {
+    const students = [
+      student(0, { lead: "I prefer to lead" }),
+      student(1, { lead: FOLLOWER }),
+      student(2, { lead: FOLLOWER }),
+      student(3, { lead: FOLLOWER }),
+    ];
+    const input: SolverInput = {
+      students,
+      teams: [team("a", 2, 2), team("b", 2, 2)],
+      idealTeamSize: 2,
+      constraints: [{ ...constraint, weight: "important" }],
+      questions: [leadQ],
+      timeLimitSeconds: 10,
+    };
+    // Only one leader exists, so exactly one team must go without.
+    const evaluation = evaluateAssignment(input, { a: ["hash0", "hash1"], b: ["hash2", "hash3"] });
+    expect(evaluation.totalPenalty).toBe(100);
+    expect(evaluation.byTeam.b).toHaveLength(1);
+    expect(evaluation.byTeam.a ?? []).toHaveLength(0);
+  });
+
+  it("counts a multi-select answer the student ticked among others", () => {
+    const rolesQ: Question = {
+      id: "roles",
+      kind: "multi",
+      prompt: "Preferred team roles",
+      required: false,
+      options: ["Leader / coordinator", "Writer / communicator"],
+    };
+    const students = [
+      student(0, { roles: ["Writer / communicator", "Leader / coordinator"] }),
+      student(1, { roles: ["Writer / communicator"] }),
+    ];
+    const input: SolverInput = {
+      students,
+      teams: [team("a", 2, 2)],
+      idealTeamSize: 2,
+      constraints: [
+        {
+          id: "c1",
+          kind: "minCategory",
+          weight: "must",
+          questionId: "roles",
+          value: "Leader / coordinator",
+          minCount: 1,
+        },
+      ],
+      questions: [rolesQ],
+      timeLimitSeconds: 10,
+    };
+    expect(evaluateAssignment(input, { a: ["hash0", "hash1"] }).totalPenalty).toBe(0);
+  });
+});
+
+describe("category alignment", () => {
+  const constraint: Constraint = { id: "c1", kind: "alignCategory", weight: "must", questionId: "work" };
+
+  it("groups students who want to work the same way", async () => {
+    const students = [
+      student(0, { work: "Mostly in person" }),
+      student(1, { work: "Mostly in person" }),
+      student(2, { work: "Mostly remote" }),
+      student(3, { work: "Mostly remote" }),
+    ];
+    const input: SolverInput = {
+      students,
+      teams: [team("a", 2, 2), team("b", 2, 2)],
+      idealTeamSize: 2,
+      constraints: [constraint],
+      questions: [workQ],
+      timeLimitSeconds: 10,
+    };
+    const result = await solve(input);
+    const teamOf = (h: string) => (result.teams.a.includes(h) ? "a" : "b");
+    expect(teamOf("hash0")).toBe(teamOf("hash1"));
+    expect(teamOf("hash2")).toBe(teamOf("hash3"));
+    expect(result.objective).toBeLessThan(1);
+  });
+
+  it("charges only the members outside their team's majority", () => {
+    const students = [
+      student(0, { work: "Mostly in person" }),
+      student(1, { work: "Mostly in person" }),
+      student(2, { work: "Mostly remote" }),
+      student(3, { work: "Hybrid" }),
+    ];
+    const input: SolverInput = {
+      students,
+      teams: [team("a", 4, 4)],
+      idealTeamSize: 4,
+      constraints: [{ ...constraint, weight: "important" }],
+      questions: [workQ],
+      timeLimitSeconds: 10,
+    };
+    // Two in person, one remote, one hybrid: the majority is "Mostly in
+    // person", leaving two odd ones out at 100 apiece.
+    const evaluation = evaluateAssignment(input, { a: ["hash0", "hash1", "hash2", "hash3"] });
+    const align = evaluation.details.filter((d) => d.label.includes("not on the team"));
+    expect(align).toHaveLength(1);
+    expect(align[0].penalty).toBe(200);
+  });
+
+  it("leaves students who never answered out of the count", () => {
+    const students = [
+      student(0, { work: "Mostly in person" }),
+      student(1, { work: "Mostly remote" }),
+      { ...student(2, {}), submitted: false },
+      { ...student(3, {}), submitted: false },
+    ];
+    const input: SolverInput = {
+      students,
+      teams: [team("a", 2, 2), team("b", 2, 2)],
+      idealTeamSize: 2,
+      constraints: [{ ...constraint, weight: "important" }],
+      questions: [workQ],
+      timeLimitSeconds: 10,
+    };
+    // One respondent per team, so each team is internally consistent and the
+    // non-respondents cost nothing wherever they land.
+    const evaluation = evaluateAssignment(input, { a: ["hash0", "hash2"], b: ["hash1", "hash3"] });
+    expect(evaluation.totalPenalty).toBe(0);
+  });
+
+  it("evaluator agrees with the solver objective on both new constraints", async () => {
+    const students = [
+      student(0, { lead: "I prefer to lead", work: "Mostly in person" }),
+      student(1, { lead: FOLLOWER, work: "Mostly in person" }),
+      student(2, { lead: FOLLOWER, work: "Mostly remote" }),
+      student(3, { lead: "I prefer to lead", work: "Mostly remote" }),
+      student(4, { lead: FOLLOWER, work: "Hybrid" }),
+      student(5, { lead: FOLLOWER, work: "Mostly remote" }),
+    ];
+    const input: SolverInput = {
+      students,
+      teams: [team("a", 3, 3), team("b", 3, 3)],
+      idealTeamSize: 3,
+      constraints: [
+        { id: "c1", kind: "minCategory", weight: "must", questionId: "lead", value: "I prefer to lead", minCount: 1 },
+        { id: "c2", kind: "alignCategory", weight: "important", questionId: "work" },
+      ],
+      questions: [leadQ, workQ],
+      timeLimitSeconds: 10,
+    };
+    const result = await solve(input);
+    const evaluation = evaluateAssignment(input, result.teams);
+    expect(evaluation.totalPenalty).toBeCloseTo(result.objective, 3);
+  });
+});

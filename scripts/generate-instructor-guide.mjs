@@ -262,9 +262,16 @@ p(
 h3("Constraints you add yourself");
 bullets([
   "Anti-isolation — never put exactly one student with a given value (e.g. exactly one woman) on a team: each team gets zero or at least two. Great for our Gender question.",
+  "Category coverage — every team needs at least N students who gave a particular answer (e.g. >=1 student answering “I prefer to lead” on the leadership question, so no team is left without anyone willing to coordinate). Works on multi-select questions too, so “Leader / coordinator” among preferred roles counts.",
   "Capability coverage — every team needs at least N students scoring >= a threshold on a numeric question (e.g. >=1 student rating spreadsheet skill >=4).",
+  "Alignment — team members should give the same answer to a single-choice question (e.g. mostly in person / hybrid / mostly remote), so a team shares a way of working instead of splitting over it. Each team settles on whichever answer most of its members gave; every member outside it costs the weight once. The optimizer picks the answer per team, so no way of working is privileged.",
   "Balance a numeric attribute — spread a numeric question's average evenly across teams (e.g. even spreadsheet skill).",
 ]);
+p(
+  "Coverage and alignment pull in opposite directions on purpose: coverage spreads a scarce answer across teams, " +
+    "alignment concentrates one inside each team. Anti-isolation is a third thing again — it asks for none or " +
+    "at least two, never exactly one.",
+);
 h3("Constraints TeamForge manages or suggests for you");
 bullets([
   "Project requirements (umbrella) — appears automatically when projects have requirements, tagged “from Projects”. Set how strongly to enforce it with its weight; edit the underlying requirements on the Projects tab.",
@@ -272,7 +279,8 @@ bullets([
 ]);
 p(
   "For our example we set: project requirements = Must hold; anti-isolation on Gender = Important; balance spreadsheet " +
-    "skill = Important; respect teammate preferences = Nice to have.",
+    "skill = Important; at least one student willing to lead per team = Important; alignment on work preference = " +
+    "Nice to have; respect teammate preferences = Nice to have.",
 );
 
 // ----------------------------------------------------------------------------

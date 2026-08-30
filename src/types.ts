@@ -132,6 +132,29 @@ export interface MinCapabilityConstraint extends ConstraintBase {
   minCount: number;
 }
 
+/** Every team needs at least `minCount` students who answered `value`.
+ *
+ * The categorical twin of MinCapabilityConstraint: "someone willing to lead"
+ * or "someone who can drive" is usually asked as a choice, not a 1-5 rating,
+ * and anti-isolation cannot express it (it asks for none-or-two, not at-least-one). */
+export interface MinCategoryConstraint extends ConstraintBase {
+  kind: "minCategory";
+  questionId: string;
+  value: string;
+  minCount: number;
+}
+
+/** Team members should give the *same* answer to a categorical question.
+ *
+ * The opposite of balancing: where balanceNumeric spreads an attribute evenly
+ * across teams, this concentrates one inside each team, so a team lands on a
+ * shared way of working (all in person, or all remote) rather than a mix.
+ * Each member outside their team's majority answer costs the constraint weight. */
+export interface AlignCategoryConstraint extends ConstraintBase {
+  kind: "alignCategory";
+  questionId: string;
+}
+
 /** Reward assigning students to projects they ranked highly. */
 export interface ProjectPreferenceConstraint extends ConstraintBase {
   kind: "projectPreference";
@@ -147,6 +170,8 @@ export type Constraint =
   | AntiIsolationConstraint
   | BalanceNumericConstraint
   | MinCapabilityConstraint
+  | MinCategoryConstraint
+  | AlignCategoryConstraint
   | ProjectPreferenceConstraint
   | TeammatePreferenceConstraint;
 

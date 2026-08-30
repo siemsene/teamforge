@@ -27,6 +27,40 @@ export function optionalNumericAnswer(answer: SurveyAnswers[string] | undefined)
   return typeof answer === "number" && Number.isFinite(answer) ? answer : null;
 }
 
+/**
+ * The student's single categorical answer, or null where there isn't one.
+ *
+ * Multi-select answers return null on purpose: "everyone on this team gave the
+ * same answer" has no meaning when a student can tick three boxes, so an
+ * alignment constraint leaves those students out rather than guessing which of
+ * their picks counts.
+ */
+export function categoryValue(answer: SurveyAnswers[string] | undefined): string | null {
+  if (answer === undefined || answer === null || Array.isArray(answer)) return null;
+  const s = String(answer).trim();
+  return s === "" ? null : s;
+}
+
+/**
+ * Groups a list of answers by their categorical value: value -> the positions
+ * holding it. Students with no answer appear in no group at all, so — as with
+ * the numeric balance — a non-respondent is never treated as an odd one out.
+ *
+ * Shared by the MIP and the evaluator so the two cannot drift apart on which
+ * answers exist and who holds them.
+ */
+export function categoryGroups(answers: (SurveyAnswers[string] | undefined)[]): Map<string, number[]> {
+  const groups = new Map<string, number[]>();
+  answers.forEach((a, i) => {
+    const v = categoryValue(a);
+    if (v == null) return;
+    const bucket = groups.get(v);
+    if (bucket) bucket.push(i);
+    else groups.set(v, [i]);
+  });
+  return groups;
+}
+
 /** Ordered project ids the student ranked (empty slots removed). */
 export function rankedProjects(answers: SurveyAnswers, questions: Question[]): string[] {
   const q = questions.find((qq) => qq.kind === "projectRanking");

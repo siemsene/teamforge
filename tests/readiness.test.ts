@@ -102,3 +102,77 @@ describe("capacity after the roster is edited", () => {
     expect(capacityOf(tooMany).detail).toContain(String(session.numStudents + 50));
   });
 });
+
+describe("validating the categorical constraints", () => {
+  const withWorkQuestion: PublicConfig = {
+    ...publicConfig,
+    questions: [
+      ...publicConfig.questions,
+      {
+        id: "work",
+        kind: "single",
+        prompt: "Work preference",
+        required: false,
+        options: ["Mostly in person", "Mostly remote"],
+      },
+      {
+        id: "roles",
+        kind: "multi",
+        prompt: "Preferred roles",
+        required: false,
+        options: ["Leader / coordinator", "Writer"],
+      },
+    ],
+  };
+  const constraintsItem = (s: SessionDoc, c: PublicConfig = withWorkQuestion) =>
+    getSessionReadiness(s, c, projects).items.find((i) => i.id === "constraints")!;
+
+  it("accepts coverage on either a single- or multi-choice question", () => {
+    const ok = constraintsItem({
+      ...session,
+      constraints: [
+        { id: "c1", kind: "minCategory", weight: "must", questionId: "work", value: "Mostly remote", minCount: 1 },
+        {
+          id: "c2",
+          kind: "minCategory",
+          weight: "must",
+          questionId: "roles",
+          value: "Leader / coordinator",
+          minCount: 1,
+        },
+      ],
+    });
+    expect(ok.ok).toBe(true);
+  });
+
+  it("blocks a coverage constraint whose answer no longer exists", () => {
+    // Left alone this is a penalty on every team that no allocation can clear,
+    // so it has to surface as something to fix rather than as a bad solve.
+    const report = constraintsItem({
+      ...session,
+      constraints: [
+        { id: "c1", kind: "minCategory", weight: "must", questionId: "work", value: "Hybrid", minCount: 1 },
+      ],
+    });
+    expect(report.ok).toBe(false);
+    expect(report.detail).toContain("Category coverage");
+  });
+
+  it("blocks alignment on a multi-choice question", () => {
+    // "Everyone gave the same answer" has no meaning when students tick several.
+    const report = constraintsItem({
+      ...session,
+      constraints: [{ id: "c1", kind: "alignCategory", weight: "important", questionId: "roles" }],
+    });
+    expect(report.ok).toBe(false);
+    expect(report.detail).toContain("Alignment");
+  });
+
+  it("accepts alignment on a single-choice question", () => {
+    const report = constraintsItem({
+      ...session,
+      constraints: [{ id: "c1", kind: "alignCategory", weight: "important", questionId: "work" }],
+    });
+    expect(report.ok).toBe(true);
+  });
+});

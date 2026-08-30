@@ -75,7 +75,7 @@ npm run docs   # runs scripts/generate-{instructor,student}-guide.mjs
 1. Instructor registers (email verification + manual admin approval).
 2. Creates a session: student count, team sizes, passphrase → downloads the one-time **login codes CSV** and **recovery key**.
 3. Defines projects with requirements (e.g. "needs ≥1 CS major") — matching survey questions are generated automatically; adds custom numeric/categorical/teammate-preference questions.
-4. Adds constraints (anti-isolation, capability coverage, balance, preferences) with priorities.
+4. Adds constraints (anti-isolation, category/capability coverage, alignment, balance, preferences) with priorities.
 5. Opens the session and emails each student the survey link + their code (template provided).
 6. Students submit; the dashboard shows completion by code number. Enrollment churn in the first weeks is handled on the **Roster** tab: add students who joined late (their codes are shown once, as at creation, to append to the master CSV) or remove students who dropped. Code indexes are retired, never reused, because the index is what names a student inside every encrypted payload. Anything already derived from the roster — a saved allocation, provisioned teams — says it is out of date rather than being quietly wrong.
 7. Instructor closes the session, unlocks with the passphrase, runs the optimizer, drags students between teams with live violation feedback, exports the final CSV, and purges student data.

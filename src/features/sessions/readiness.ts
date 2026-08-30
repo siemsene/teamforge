@@ -122,6 +122,19 @@ export function getSessionReadiness(
       const q = findQuestion(publicConfig.questions, c.questionId);
       if (!q || q.kind !== "number") invalidConstraints.push(c.kind === "balanceNumeric" ? "Numeric balance" : "Capability coverage");
     }
+    if (c.kind === "minCategory") {
+      const q = findQuestion(publicConfig.questions, c.questionId);
+      // The value is checked too, not just the question: unlike anti-isolation,
+      // a value nobody can pick any more leaves every team short by minCount
+      // for good — a penalty the instructor cannot shift by moving anyone.
+      if (!q || (q.kind !== "single" && q.kind !== "multi") || !q.options.includes(c.value)) {
+        invalidConstraints.push("Category coverage");
+      }
+    }
+    if (c.kind === "alignCategory") {
+      const q = findQuestion(publicConfig.questions, c.questionId);
+      if (!q || q.kind !== "single") invalidConstraints.push("Alignment");
+    }
     if (c.kind === "projectPreference" && !hasRanking) invalidConstraints.push("Project preference");
     if (c.kind === "teammatePreference" && !hasTeammates) invalidConstraints.push("Teammate preference");
   }

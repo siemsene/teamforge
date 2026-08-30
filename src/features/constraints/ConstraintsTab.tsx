@@ -28,6 +28,10 @@ export function describeConstraint(c: Constraint, questions: Question[]): string
       return `Balance team averages of "${qText(c.questionId)}"`;
     case "minCapability":
       return `Every team has ≥${c.minCount} student(s) answering ≥${c.threshold} on "${qText(c.questionId)}"`;
+    case "minCategory":
+      return `Every team has ≥${c.minCount} student(s) answering "${c.value}" (${qText(c.questionId)})`;
+    case "alignCategory":
+      return `Team members give the same answer to "${qText(c.questionId)}"`;
     case "projectPreference":
       return "Assign students to projects they ranked highly";
     case "teammatePreference":
@@ -179,6 +183,9 @@ function ConstraintForm({
   const [error, setError] = useState("");
 
   const categorical = questions.filter((q) => q.kind === "single" || q.kind === "multi");
+  // Alignment asks whether members gave the *same* answer, which only means
+  // something where each student gives exactly one.
+  const singleChoice = questions.filter((q) => q.kind === "single");
   const numeric = questions.filter((q) => q.kind === "number");
 
   const selectedCategorical = categorical.find((q) => q.id === questionId);
@@ -202,6 +209,14 @@ function ConstraintForm({
         if (!questionId) return setError("Pick a numeric question.");
         c = { id, kind, weight, questionId, threshold, minCount };
         break;
+      case "minCategory":
+        if (!questionId || !value) return setError("Pick a question and an answer.");
+        c = { id, kind, weight, questionId, value, minCount };
+        break;
+      case "alignCategory":
+        if (!questionId) return setError("Pick a single-choice question.");
+        c = { id, kind, weight, questionId };
+        break;
       default:
         return setError("Unsupported constraint type.");
     }
@@ -215,7 +230,9 @@ function ConstraintForm({
           <Field label="Constraint type">
             <Select value={kind} onChange={(e) => { setKind(e.target.value as Constraint["kind"]); setQuestionId(""); setValue(""); }} className="w-full">
               <option value="antiIsolation">Anti-isolation (never exactly one …)</option>
+              <option value="minCategory">Category coverage (every team needs someone who answered …)</option>
               <option value="minCapability">Capability coverage (every team needs …)</option>
+              <option value="alignCategory">Alignment (team members answer alike)</option>
               <option value="balanceNumeric">Balance a numeric attribute</option>
             </Select>
           </Field>
@@ -251,6 +268,50 @@ function ConstraintForm({
               </Select>
             </Field>
           </div>
+        )}
+
+        {kind === "minCategory" && (
+          <div className="grid gap-3 sm:grid-cols-3">
+            <Field label="Question">
+              <Select value={questionId} onChange={(e) => setQuestionId(e.target.value)} className="w-full">
+                <option value="">— select —</option>
+                {categorical.map((q) => (
+                  <option key={q.id} value={q.id}>
+                    {q.prompt}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="Answer every team needs" hint='e.g. "I prefer to lead"'>
+              <Select value={value} onChange={(e) => setValue(e.target.value)} className="w-full">
+                <option value="">— select —</option>
+                {options.map((o) => (
+                  <option key={o} value={o}>
+                    {o}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="Min per team">
+              <NumberInput min={1} value={minCount} onValueChange={setMinCount} />
+            </Field>
+          </div>
+        )}
+
+        {kind === "alignCategory" && (
+          <Field
+            label="Single-choice question team members should agree on"
+            hint="e.g. in person / hybrid / remote — each member outside their team's majority answer costs the weight once"
+          >
+            <Select value={questionId} onChange={(e) => setQuestionId(e.target.value)} className="w-full">
+              <option value="">— select —</option>
+              {singleChoice.map((q) => (
+                <option key={q.id} value={q.id}>
+                  {q.prompt}
+                </option>
+              ))}
+            </Select>
+          </Field>
         )}
 
         {kind === "balanceNumeric" && (
