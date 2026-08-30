@@ -38,10 +38,37 @@ export function generateShareCode(): string {
   return code;
 }
 
-export function generateShareCodes(n: number): string[] {
+/**
+ * Fresh share codes, unique among themselves and against every code already
+ * issued in this session.
+ *
+ * `taken` matters once students can be added later. A duplicate share code is
+ * not cosmetic: AllocationTab builds a `normalizeCode(shareCode) -> hash` map,
+ * where a second entry for the same code silently overwrites the first — so one
+ * student's teammate preference would be recorded against a classmate who never
+ * appeared in their answer. Comparison is under `normalizeCode` for the same
+ * reason the lookup is.
+ *
+ * Throws rather than spinning if the space is exhausted; 4 chars over a
+ * 32-symbol alphabet is ~1M, so this cannot happen below the 1000-student cap,
+ * but a silent infinite loop is not an acceptable failure mode either way.
+ */
+export function generateShareCodes(n: number, taken: Iterable<string> = []): string[] {
   const seen = new Set<string>();
-  while (seen.size < n) seen.add(generateShareCode());
-  return [...seen];
+  for (const code of taken) seen.add(normalizeCode(code));
+  const fresh: string[] = [];
+  let attempts = 0;
+  while (fresh.length < n) {
+    if (attempts++ > 1000 * (n + 1)) {
+      throw new Error("Could not generate enough distinct share codes for this session.");
+    }
+    const code = generateShareCode();
+    const key = normalizeCode(code);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    fresh.push(code);
+  }
+  return fresh;
 }
 
 /** Tolerant of case, spaces, dashes, and common transcription mistakes (O->0, I/L->1). */

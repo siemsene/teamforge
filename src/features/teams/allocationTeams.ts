@@ -134,10 +134,16 @@ export function joinAllocationTeams(hashed: HashedRow[], membership: Membership)
 
   const missing = [...membership.byHash.keys()].filter((h) => !matched.has(h));
   if (missing.length > 0) {
+    // Two very different situations reach here and the message used to assume
+    // the first: an instructor who picked the wrong file, and one who has
+    // deliberately removed those students from the session. Since the roster can
+    // now be edited, say what will happen rather than guessing why.
+    const one = missing.length === 1;
     problems.push(
-      `${missing.length} student${missing.length === 1 ? "" : "s"} in the saved allocation ${
-        missing.length === 1 ? "is" : "are"
-      } not in this file — check you uploaded the full codes CSV.`,
+      `${missing.length} student${one ? "" : "s"} in the saved allocation ${one ? "is" : "are"} not in this file, ` +
+        `so they will be left off ${one ? "their team" : "their teams"}. ` +
+        `That is what you want if ${one ? "that student has" : "those students have"} left the class; ` +
+        `otherwise check you uploaded the full codes CSV.`,
     );
   }
   return { rows, fromAllocation, fromFile, problems };

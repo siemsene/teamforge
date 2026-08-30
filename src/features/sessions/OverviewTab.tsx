@@ -47,7 +47,7 @@ export function OverviewTab() {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmReopen, setConfirmReopen] = useState(false);
   const dirty = template !== (session.emailTemplate ?? fallback);
-  const readiness = getSessionReadiness(session, publicConfig, projects);
+  const readiness = getSessionReadiness(session, publicConfig, projects, students.length);
 
   async function copy(text: string, which: string) {
     // Unavailable over plain HTTP and blockable by permission, so a bare await
@@ -186,10 +186,10 @@ export function OverviewTab() {
         <h2 className="mb-2 font-semibold">At a glance</h2>
         <dl className="grid grid-cols-2 gap-x-6 gap-y-1 text-sm sm:grid-cols-4">
           <dt className="text-slate-500">Students</dt>
-          <dd>{session.numStudents}</dd>
+          <dd>{students.length}</dd>
           <dt className="text-slate-500">Submitted</dt>
           <dd>
-            {submitted} / {session.numStudents}
+            {submitted} / {students.length}
           </dd>
           <dt className="text-slate-500">Team size</dt>
           <dd>

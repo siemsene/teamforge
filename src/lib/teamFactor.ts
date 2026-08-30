@@ -98,7 +98,21 @@ export interface TeamEvalInput {
   memberCodeIndexes: number[];
   /** Submitted evaluations from this team's members. */
   submissions: PeerEvalAnswers[];
+  /**
+   * Members who submitted a ballot that carried no usable opinion — everything
+   * they allocated went to teammates who have since left. An even split is
+   * imputed for them, as for silence, but they did submit, so `noSubmission`
+   * must not fire against them.
+   */
+  submittedButNeutralized?: number[];
 }
+
+// A note for whoever is tempted to reconcile ballots *here* rather than before
+// calling: don't. public/peer-eval-team-factor.xlsx models this module's
+// arithmetic and is published to students as a live worked example, so anything
+// added here has to be added there too. Restricting a ballot to the teammates
+// still on the team is a property of the ballot, not of the factor, and lives in
+// reconcileBallot (lib/evalValidation.ts).
 
 /** One received rating, normalised so an even split is 1.00. */
 export interface ReceivedShare {
@@ -254,11 +268,12 @@ export function computeMemberFactor(
 export function computeTeamFactors(team: TeamEvalInput, params: FactorParams): TeamFactorResult {
   const teamSize = team.memberCodeIndexes.length;
   const neutral = neutralShare(teamSize);
-  const submitted = new Set(
-    team.submissions
+  const submitted = new Set([
+    ...team.submissions
       .filter((s) => team.memberCodeIndexes.includes(s.raterCodeIndex))
       .map((s) => s.raterCodeIndex),
-  );
+    ...(team.submittedButNeutralized ?? []),
+  ]);
 
   const members: MemberFactorResult[] = team.memberCodeIndexes.map((ratee) => {
     const received: ReceivedShare[] = [];

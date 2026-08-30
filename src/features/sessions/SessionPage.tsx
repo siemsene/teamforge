@@ -22,7 +22,7 @@ function Tabs() {
     ...(session.genericProjects ? [] : [{ to: "projects", label: "Projects" }]),
     { to: "survey", label: "Survey" },
     { to: "constraints", label: "Constraints" },
-    { to: "responses", label: "Responses" },
+    { to: "responses", label: "Roster" },
     { to: "allocation", label: "Allocation" },
     ...(teamMgmt
       ? [
@@ -58,7 +58,7 @@ function Tabs() {
 
 function SessionBody() {
   const { session, publicConfig, projects, students } = useSession();
-  const readiness = getSessionReadiness(session, publicConfig, projects);
+  const readiness = getSessionReadiness(session, publicConfig, projects, students.length);
   return (
     <div className="mx-auto max-w-5xl px-4 py-6">
       <div className="mb-2 flex items-center gap-3">
@@ -123,7 +123,10 @@ function SetupProgress({
     { label: "Ready", done: isReady },
     { label: "Responses", done: total > 0 && submitted === total, note: `${submitted}/${total}` },
     { label: "Allocation", done: hasAllocation },
-    ...(teamMgmt ? [{ label: "Roster", done: teamMgmt.rostered }] : []),
+    // "Teams uploaded" rather than "Roster": the Roster tab is now where the
+    // class list is edited, and two steps called the same thing meaning
+    // different things is worse than a longer label.
+    ...(teamMgmt ? [{ label: "Teams uploaded", done: teamMgmt.rostered }] : []),
   ];
   return (
     <div className="mb-4 overflow-x-auto rounded-md border border-slate-200 bg-white px-3 py-2">

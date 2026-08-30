@@ -385,6 +385,33 @@ export interface SessionDoc {
   /** Number of teams when genericProjects; otherwise the project count rules. */
   numTeams: number;
   constraints: Constraint[];
+  /**
+   * Highest code index ever issued in this session. A high-water mark, not a
+   * count: it never falls when a student is removed.
+   *
+   * A code index names a student inside every encrypted payload the platform
+   * holds — nickname map keys, RosterInfo.teammates, the points map of a ballot,
+   * a published result. Handing a retired index to somebody new would silently
+   * graft them onto the previous holder's history, and none of those payloads
+   * can be rewritten to say otherwise. So indexes are retired for good.
+   *
+   * Absent on sessions created before roster editing; read via `nextCodeIndex`,
+   * which falls back to numStudents and the live roster.
+   */
+  maxCodeIndex?: number;
+  /**
+   * Code indexes of students who have been removed. Bare integers — they name
+   * nobody outside this session and carry no student data.
+   *
+   * Kept so a peer-evaluation ballot can still be validated against the roster
+   * it was *written* against after the instructor re-provisions teams without
+   * the departed member. See reconcileBallot in lib/evalValidation.ts.
+   */
+  retiredCodeIndexes?: number[];
+  /** Last time a student was added or removed, so artifacts built from an older
+   * roster (the saved allocation, the provisioned teams) can say they are out
+   * of date rather than being quietly wrong. */
+  rosterChangedAt?: number;
   wrappedKeys: WrappedKeys;
   /** Instructor-editable invitation email shown on the overview tab. */
   emailTemplate?: string;

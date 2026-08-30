@@ -19,10 +19,18 @@ function findQuestion(questions: Question[], id: string): Question | undefined {
   return questions.find((q) => q.id === id);
 }
 
+/**
+ * `studentCount` is passed in rather than read off session.numStudents: students
+ * can be added and removed after creation, and the capacity check has to be
+ * about the roster that exists, not the number the session was created with.
+ * Callers that have the live list pass its length; the default keeps older
+ * callers (and tests) working off the stored count.
+ */
 export function getSessionReadiness(
   session: SessionDoc,
   publicConfig: PublicConfig,
   projects: Project[],
+  studentCount: number = session.numStudents,
 ): ReadinessReport {
   const items: ReadinessItem[] = [];
   const teamCount = session.genericProjects ? session.numTeams : projects.length;
@@ -55,12 +63,12 @@ export function getSessionReadiness(
   items.push({
     id: "capacity",
     label: "Team capacity fits enrollment",
-    ok: teamCount > 0 && minCapacity <= session.numStudents && maxCapacity >= session.numStudents,
+    ok: teamCount > 0 && minCapacity <= studentCount && maxCapacity >= studentCount,
     severity: "blocker",
     detail:
       teamCount === 0
         ? "No teams are available yet."
-        : `${session.numStudents} students; capacity range ${minCapacity}-${maxCapacity}.`,
+        : `${studentCount} students; capacity range ${minCapacity}-${maxCapacity}.`,
   });
 
   items.push({

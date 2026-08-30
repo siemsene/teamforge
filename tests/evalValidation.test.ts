@@ -5,9 +5,11 @@ import {
   needsJustification,
   neutralRange,
   pruneJustifications,
+  reconcileBallot,
   validatePeerEval,
   validateSubmittedBallot,
 } from "../src/lib/evalValidation";
+import { DEFAULT_FACTOR_PARAMS } from "../src/lib/teamFactor";
 import type { PeerEvalAnswers } from "../src/types";
 
 const CONFIG = { includeBehaviors: false, behaviorCount: 4 };
@@ -368,5 +370,120 @@ describe("validateSubmittedBallot", () => {
       { includeBehaviors: true, behaviorCount: 1 },
     );
     expect(p.some((m) => m.includes("whole numbers from 1 to 5"))).toBe(true);
+  });
+});
+
+describe("reconcileBallot", () => {
+  const ballot = (points: Record<string, number>, extra: Partial<PeerEvalAnswers> = {}): PeerEvalAnswers => ({
+    round: "summative",
+    raterCodeIndex: 1,
+    teamLabel: "Team 1",
+    points,
+    justifications: {},
+    ...extra,
+  });
+
+  it("is a provable no-op when nobody has left", () => {
+    // The ordinary path must be untouched, object identity included, so this
+    // cannot quietly change results for teams nothing happened to.
+    const b = ballot({ "2": 40, "3": 30, "4": 30 });
+    const out = reconcileBallot(b, [2, 3, 4]);
+    expect(out.answers).toBe(b);
+    expect(out.dropped).toEqual([]);
+    expect(out.noOpinion).toBe(false);
+  });
+
+  it("drops a departed teammate and scales the rest back to 100", () => {
+    const out = reconcileBallot(ballot({ "2": 40, "3": 30, "4": 30 }), [2, 3]);
+    expect(out.answers.points["2"]).toBeCloseTo(57.14, 2);
+    expect(out.answers.points["3"]).toBeCloseTo(42.86, 2);
+    expect(out.dropped).toEqual([{ codeIndex: 4, points: 30 }]);
+  });
+
+  it("preserves what the rater actually judged about the survivors", () => {
+    const out = reconcileBallot(ballot({ "2": 40, "3": 30, "4": 30 }), [2, 3]);
+    const before = 40 / 30;
+    const after = out.answers.points["2"] / out.answers.points["3"];
+    expect(after).toBeCloseTo(before, 10);
+  });
+
+  it("always sums to exactly 100", () => {
+    for (let trial = 0; trial < 300; trial++) {
+      const size = 3 + Math.floor(Math.random() * 6);
+      const idx = Array.from({ length: size }, (_, i) => i + 2);
+      let left = 100;
+      const points: Record<string, number> = {};
+      idx.forEach((i, k) => {
+        const p = k === idx.length - 1 ? left : Math.floor(Math.random() * (left + 1));
+        points[String(i)] = p;
+        left -= p;
+      });
+      const survivors = idx.filter(() => Math.random() > 0.35);
+      const out = reconcileBallot(ballot(points), survivors);
+      if (out.noOpinion || out.dropped.length === 0) continue;
+      const values = Object.values(out.answers.points);
+      expect(values.reduce((a, b) => a + b, 0)).toBeCloseTo(100, 9);
+    }
+  });
+
+  it("reports no opinion when every surviving allocation was zero", () => {
+    const out = reconcileBallot(ballot({ "2": 0, "3": 0, "4": 100 }), [2, 3]);
+    expect(out.noOpinion).toBe(true);
+  });
+
+  it("reports no opinion when the team is down to one person", () => {
+    const out = reconcileBallot(ballot({ "2": 100 }), []);
+    expect(out.noOpinion).toBe(true);
+    expect(() => reconcileBallot(ballot({ "2": 100 }), [])).not.toThrow();
+  });
+
+  it("keeps a survivor's justification verbatim even when scaling moves the number back in band", () => {
+    // The student wrote that sentence about the allocation they chose. Re-pruning
+    // against our own arithmetic would delete it for them.
+    const out = reconcileBallot(
+      ballot({ "2": 20, "3": 20, "4": 60 }, { justifications: { "2": "Missed two meetings.", "4": "Carried us." } }),
+      [2, 3],
+    );
+    expect(out.answers.points).toEqual({ "2": 50, "3": 50 });
+    expect(out.answers.justifications["2"]).toBe("Missed two meetings.");
+    expect(out.answers.justifications["4"]).toBeUndefined();
+  });
+
+  it("prunes behaviour ratings to the survivors without rescaling them", () => {
+    const out = reconcileBallot(
+      ballot({ "2": 50, "3": 50 }, { behaviorRatings: { "2": [5, 4, 3, 2], "3": [1, 1, 1, 1] } }),
+      [2],
+    );
+    expect(out.answers.behaviorRatings).toEqual({ "2": [5, 4, 3, 2] });
+  });
+
+  it("carries the rest of the ballot through untouched", () => {
+    const out = reconcileBallot(
+      ballot({ "2": 50, "3": 50 }, { commentToInstructor: "Please read this." }),
+      [2],
+    );
+    expect(out.answers.raterCodeIndex).toBe(1);
+    expect(out.answers.teamLabel).toBe("Team 1");
+    expect(out.answers.round).toBe("summative");
+    expect(out.answers.commentToInstructor).toBe("Please read this.");
+  });
+
+  it("leaves a neutral rater neutral after a teammate departs", () => {
+    // The property that actually matters, and the one integer apportionment
+    // broke: a rater who accepted the form's default even split must not end up
+    // pushing anyone's factor off 1.00 just because the team got smaller. On a
+    // team of nine an even split is 13/13/13/13/12/12/12/12, and rounding the
+    // reconciled ballot back to whole points turned the 12s into a share of
+    // 0.91 — outside the dead band, and a grade penalty invented by arithmetic.
+    for (const teammates of [2, 3, 4, 5, 6, 7, 8]) {
+      const idx = Array.from({ length: teammates }, (_, i) => i + 2);
+      const survivors = idx.slice(0, -1);
+      const out = reconcileBallot(ballot(evenSplit(idx)), survivors);
+      const neutral = 100 / survivors.length;
+      for (const i of survivors) {
+        const share = out.answers.points[String(i)] / neutral;
+        expect(Math.abs(share - 1)).toBeLessThanOrEqual(DEFAULT_FACTOR_PARAMS.deadband);
+      }
+    }
   });
 });

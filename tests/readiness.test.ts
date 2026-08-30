@@ -86,3 +86,19 @@ describe("session readiness", () => {
     expect(report.blockers.map((b) => b.id)).toContain("capacity");
   });
 });
+
+describe("capacity after the roster is edited", () => {
+  it("judges capacity by the live roster, not the number the session was created with", () => {
+    // numStudents is what the session was created with; students can be added
+    // and removed since. Checking the stored figure would keep clearing a
+    // session whose real roster no longer fits, or keep blocking one that does.
+    const base = getSessionReadiness(session, publicConfig, projects);
+    const capacityOf = (r: ReturnType<typeof getSessionReadiness>) =>
+      r.items.find((i) => i.id === "capacity")!;
+    expect(capacityOf(base).ok).toBe(true);
+
+    const tooMany = getSessionReadiness(session, publicConfig, projects, session.numStudents + 50);
+    expect(capacityOf(tooMany).ok).toBe(false);
+    expect(capacityOf(tooMany).detail).toContain(String(session.numStudents + 50));
+  });
+});

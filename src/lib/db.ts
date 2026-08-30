@@ -21,6 +21,8 @@ import {
   where,
   writeBatch,
   runTransaction,
+  arrayUnion,
+  increment,
   type FirestoreError,
   type Unsubscribe,
   type WriteBatch,
@@ -118,6 +120,111 @@ export async function createSession(
     });
     await batch.commit();
   }
+}
+
+/** Raised when another tab claimed the same code indexes first. */
+export class CodeIndexRaceError extends Error {
+  constructor(readonly claimedUpTo: number) {
+    super("Another tab added students to this session a moment ago. Try again.");
+    this.name = "CodeIndexRaceError";
+  }
+}
+
+/**
+ * Adds students to a session that already exists.
+ *
+ * Enrollment churns for the first weeks of term while teams have to be assigned
+ * early, so the roster cannot be fixed at creation.
+ *
+ * The session doc is written first and on its own — the same ordering
+ * createSession needs, for the same reason: the rules on the student docs call
+ * ownsSession(sid), which get()s sessions/{sid}, and a rule get() sees only
+ * committed data, never a sibling write in the same batch.
+ *
+ * That first write also *claims* the range of code indexes, inside a
+ * transaction. Two tabs adding at the same moment would otherwise both read the
+ * same high-water mark and both mint index 31 — and a duplicate index is
+ * unrecoverable, because the index is what names a student inside every
+ * encrypted payload. The caller computes the indexes before calling (it has to:
+ * the one-time codes CSV is built before anything is written); this only
+ * verifies the range is still free.
+ */
+export async function addStudents(
+  sid: string,
+  roster: { hash: string; shareCode: string; codeIndex: number }[],
+  /** Highest index the caller can see live, so a session created before
+   * maxCodeIndex existed still starts above its current students. */
+  observedMaxCodeIndex: number,
+): Promise<void> {
+  if (roster.length === 0) return;
+  const first = roster[0].codeIndex;
+  const last = roster[roster.length - 1].codeIndex;
+
+  await runTransaction(db, async (tx) => {
+    const ref = doc(db, "sessions", sid);
+    const snap = await tx.get(ref);
+    const current = snap.data() as SessionDoc | undefined;
+    if (!current) throw new Error("This session no longer exists.");
+    const high = Math.max(current.maxCodeIndex ?? 0, current.numStudents ?? 0, observedMaxCodeIndex);
+    if (first <= high) throw new CodeIndexRaceError(high);
+    tx.update(ref, {
+      maxCodeIndex: last,
+      numStudents: (current.numStudents ?? 0) + roster.length,
+      rosterChangedAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+  });
+
+  // Firestore batches cap at 500 writes; chunk, as createSession does.
+  for (let i = 0; i < roster.length; i += 450) {
+    const batch = writeBatch(db);
+    roster.slice(i, i + 450).forEach((entry) => {
+      const student: StudentDoc = {
+        codeIndex: entry.codeIndex,
+        shareCode: entry.shareCode,
+        submittedAt: null,
+        response: null,
+      };
+      batch.set(doc(db, "sessions", sid, "students", entry.hash), student);
+    });
+    await batch.commit();
+  }
+}
+
+/**
+ * Removes students from a session, documents and all.
+ *
+ * The delete is outright rather than a "withdrawn" flag: a tombstone would still
+ * be a document the student could get(), and the erasure promise on the Privacy
+ * tab has to mean what it says. It also closes access by itself — login is a
+ * lookup of this very document, so once it is gone the code stops working.
+ *
+ * The code indexes are *not* freed. maxCodeIndex is left where it is and the
+ * removed indexes are recorded, because they still name these students in the
+ * saved allocation, in every teammate's encrypted roster blob, and in ballots
+ * already submitted.
+ *
+ * numStudents moves by increment() rather than an absolute the caller worked
+ * out, so two removals in flight cannot clobber each other's count.
+ */
+export async function removeStudents(
+  sid: string,
+  students: { hash: string; codeIndex: number }[],
+): Promise<void> {
+  if (students.length === 0) return;
+  for (let i = 0; i < students.length; i += 450) {
+    const batch = writeBatch(db);
+    students.slice(i, i + 450).forEach((s) => {
+      batch.delete(doc(db, "sessions", sid, "students", s.hash));
+    });
+    await batch.commit();
+  }
+  await updateDoc(doc(db, "sessions", sid), {
+    numStudents: increment(-students.length),
+    retiredCodeIndexes: arrayUnion(...students.map((s) => s.codeIndex)),
+    rosterChangedAt: Date.now(),
+    updatedAt: Date.now(),
+  });
 }
 
 export function watchSessions(ownerUid: string, cb: (rows: SessionSummary[]) => void): Unsubscribe {
@@ -250,6 +357,21 @@ export async function withdrawResponse(sid: string, hash: string): Promise<void>
 export async function saveAllocation(sid: string, payload: EciesPayload): Promise<void> {
   const docData: AllocationDoc = { payload, updatedAt: Date.now() };
   await setDoc(doc(db, "sessions", sid, "results", "allocation"), docData);
+}
+
+/**
+ * Live view of *when* the allocation was last saved — not its contents.
+ *
+ * The payload is encrypted, but updatedAt is plaintext, which is what lets a tab
+ * that has not been unlocked still notice that the roster has moved on since the
+ * allocation was worked out.
+ */
+export function watchAllocationUpdatedAt(sid: string, cb: (at: number | null) => void): Unsubscribe {
+  return onSnapshot(
+    doc(db, "sessions", sid, "results", "allocation"),
+    (snap) => cb(snap.exists() ? ((snap.data() as AllocationDoc).updatedAt ?? null) : null),
+    () => cb(null),
+  );
 }
 
 export async function getAllocationDoc(sid: string): Promise<AllocationDoc | null> {
@@ -472,6 +594,19 @@ export async function purgeStudentData(sid: string): Promise<PurgeResult> {
   }
   await deleteIfPresent(["sessions", sid, "results", "allocation"], failures);
   await deleteIfPresent(["sessions", sid, "results", "teamDirectory"], failures);
+  // The roster is now empty, so say so: numStudents feeds the capacity check and
+  // the instructor-usage rollup, and leaving it at the old figure overstates
+  // both for good. maxCodeIndex is deliberately left where it is — the indexes
+  // are still spent.
+  try {
+    await updateDoc(doc(db, "sessions", sid), {
+      numStudents: 0,
+      rosterChangedAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+  } catch (e) {
+    failures.push(`session counters: ${e instanceof Error ? e.message : String(e)}`);
+  }
   return { students, failures };
 }
 

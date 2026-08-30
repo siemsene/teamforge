@@ -174,6 +174,33 @@ describe.skipIf(!emulatorHost)("firestore security rules", () => {
     );
   });
 
+  it("owners can add and remove individual students after the session exists", async () => {
+    // The roster is editable mid-term, so this is an ordinary write path now
+    // rather than only part of session creation or a purge.
+    const owner = env.authenticatedContext("owner1").firestore();
+    await assertSucceeds(
+      setDoc(doc(owner, "sessions/s1/students/hashNew"), {
+        codeIndex: 31,
+        shareCode: "WXYZ",
+        submittedAt: null,
+        response: null,
+      }),
+    );
+    await assertSucceeds(deleteDoc(doc(owner, "sessions/s1/students/hashNew")));
+  });
+
+  it("another instructor cannot add or remove students on a session they do not own", async () => {
+    const other = env.authenticatedContext("owner2").firestore();
+    await assertFails(
+      setDoc(doc(other, "sessions/s1/students/hashNew"), {
+        codeIndex: 31,
+        submittedAt: null,
+        response: null,
+      }),
+    );
+    await assertFails(deleteDoc(doc(other, "sessions/s1/students/hashA")));
+  });
+
   it("owners can purge student data", async () => {
     const owner = env.authenticatedContext("owner1").firestore();
     await assertSucceeds(deleteDoc(doc(owner, "sessions/s1/students/hashA")));

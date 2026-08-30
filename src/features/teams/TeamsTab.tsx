@@ -7,6 +7,7 @@ import { downloadFile, sessionFilename } from "../../lib/util";
 import type { ContractContent, Nicknames, TeamDirectory, TeamDoc } from "../../types";
 import { Badge, Button, Card, ErrorText, Spinner } from "../../components/ui";
 import { UnlockPanel } from "../sessions/UnlockPanel";
+import { rosterStaleness } from "../sessions/rosterStaleness";
 import { RosterImport } from "./RosterImport";
 import { ContractPrint } from "./ContractPrint";
 import { contractPdfName, printAs } from "../../lib/printPdf";
@@ -27,6 +28,7 @@ export function TeamsTab() {
   useEffect(() => watchTeams(sid, setTeams), [sid]);
 
   const provisioned = session.teamMgmt?.rosterUploadedAt != null;
+  const stale = rosterStaleness(session, null); // only teamRosterStale is read here
 
   if (!provisioned) {
     return (
@@ -58,6 +60,13 @@ export function TeamsTab() {
                 ` on ${new Date(session.teamMgmt.rosterUploadedAt).toLocaleDateString()}`}
               .
             </p>
+            {stale.teamRosterStale && (
+              <p className="mt-2 rounded-md border border-amber-200 bg-amber-50 p-2 text-sm text-amber-900">
+                Your roster has changed since these teams were provisioned. Re-upload your login-codes CSV so the
+                teams match it. Until you do, a student who was removed still appears on their teammates&rsquo; peer
+                evaluations — and keeps the key to their team&rsquo;s contract.
+              </p>
+            )}
           </div>
           {/* Teams change: a student enrols late, or you move somebody by hand.
               Re-uploading keeps each unchanged team's contract and display

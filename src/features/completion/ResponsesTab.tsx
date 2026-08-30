@@ -1,8 +1,11 @@
 import { useSession } from "../sessions/SessionContext";
 import { Card } from "../../components/ui";
+import { RosterPanel } from "./RosterPanel";
+import { rosterStaleness } from "../sessions/rosterStaleness";
 
 export function ResponsesTab() {
-  const { students, session } = useSession();
+  const { students, session, allocationUpdatedAt } = useSession();
+  const stale = rosterStaleness(session, allocationUpdatedAt);
   const submitted = students.filter((s) => s.submittedAt).length;
   const pct = students.length ? Math.round((submitted / students.length) * 100) : 0;
 
@@ -25,25 +28,27 @@ export function ResponsesTab() {
         )}
       </Card>
 
-      <Card>
-        <p className="mb-3 text-sm text-slate-600">
-          Each tile is one login code (students stay anonymous here). Match the numbers against your private
-          code-assignment CSV to remind specific students.
-        </p>
-        <div className="grid grid-cols-5 gap-2 sm:grid-cols-8 md:grid-cols-10">
-          {students.map((s) => (
-            <div
-              key={s.hash}
-              title={s.submittedAt ? `Submitted ${new Date(s.submittedAt).toLocaleString()}` : "Not submitted"}
-              className={`rounded-md px-2 py-1.5 text-center text-xs font-medium ${
-                s.submittedAt ? "bg-green-100 text-green-800" : "bg-slate-100 text-slate-500"
-              }`}
-            >
-              #{s.codeIndex}
-            </div>
-          ))}
-        </div>
-      </Card>
+      {(stale.allocationStale || stale.teamRosterStale) && (
+        <Card className="border-amber-200 bg-amber-50">
+          <h2 className="mb-1 font-semibold text-amber-900">Your roster has changed</h2>
+          <ul className="list-disc pl-5 text-sm text-amber-900">
+            {stale.allocationStale && (
+              <li>
+                The saved allocation was worked out from an earlier roster. Re-run the optimizer on the{" "}
+                <strong>Allocation</strong> tab and save.
+              </li>
+            )}
+            {stale.teamRosterStale && (
+              <li>
+                Teams were provisioned from an earlier roster. Re-upload your login-codes CSV on the{" "}
+                <strong>Teams</strong> tab.
+              </li>
+            )}
+          </ul>
+        </Card>
+      )}
+
+      <RosterPanel />
     </div>
   );
 }

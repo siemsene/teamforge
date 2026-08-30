@@ -1,5 +1,11 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
-import { watchProjects, watchPublicConfig, watchSession, watchStudents } from "../../lib/db";
+import {
+  watchAllocationUpdatedAt,
+  watchProjects,
+  watchPublicConfig,
+  watchSession,
+  watchStudents,
+} from "../../lib/db";
 import type { Project, PublicConfig, SessionDoc, StudentDoc } from "../../types";
 
 export interface SessionState {
@@ -8,6 +14,9 @@ export interface SessionState {
   publicConfig: PublicConfig;
   projects: Project[];
   students: (StudentDoc & { hash: string })[];
+  /** When the allocation was last saved, or null if there is none. Plaintext,
+   * so it is available before the session is unlocked. */
+  allocationUpdatedAt: number | null;
   /** The unlocked session private key, shared across tabs for this page's
    * lifetime (memory only, never persisted). Null until the instructor unlocks. */
   sessionKey: CryptoKey | null;
@@ -27,6 +36,7 @@ export function SessionProvider({
   const [publicConfig, setPublicConfig] = useState<PublicConfig | null | undefined>(undefined);
   const [projects, setProjects] = useState<Project[]>([]);
   const [students, setStudents] = useState<(StudentDoc & { hash: string })[]>([]);
+  const [allocationUpdatedAt, setAllocationUpdatedAt] = useState<number | null>(null);
   const [error, setError] = useState("");
   const [sessionKey, setSessionKeyState] = useState<CryptoKey | null>(null);
   // Drop the unlocked key when navigating to a different session.
@@ -48,6 +58,7 @@ export function SessionProvider({
   }, [sid]);
   useEffect(() => watchProjects(sid, setProjects), [sid]);
   useEffect(() => watchStudents(sid, setStudents), [sid]);
+  useEffect(() => watchAllocationUpdatedAt(sid, setAllocationUpdatedAt), [sid]);
 
   const missing = session === null || publicConfig === null;
   const problem = missing || error ? error || "Session not found or no longer available." : undefined;
@@ -62,6 +73,7 @@ export function SessionProvider({
               publicConfig: publicConfig!,
               projects,
               students,
+              allocationUpdatedAt,
               sessionKey,
               setSessionKey: setSessionKeyState,
             }

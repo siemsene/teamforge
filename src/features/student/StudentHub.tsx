@@ -36,6 +36,7 @@ export function StudentHub({
   const [nicknames, setNicknames] = useState<Nicknames>({});
   const [savingNickname, setSavingNickname] = useState(false);
   const [current, setCurrent] = useState<StudentDoc>(student);
+  const [removed, setRemoved] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
 
@@ -88,7 +89,11 @@ export function StudentHub({
 
   async function refresh() {
     const [fresh, info] = [await getStudentByHash(sid, hash), roster];
-    if (fresh) setCurrent(fresh);
+    // A student can be removed from the session while their tab is open. Their
+    // document is gone, so every write from here on would fail; keeping the
+    // stale copy on screen would let them carry on working into a void.
+    if (!fresh) return setRemoved(true);
+    setCurrent(fresh);
     if (info && memberKey) {
       const tokenHash = await hashTeamToken(info.teamToken);
       const teamDoc = await getTeamByTokenHash(sid, tokenHash);
@@ -148,6 +153,20 @@ export function StudentHub({
     );
   const openRounds = ROUNDS.filter((r) => tm.rounds[r].status === "open");
   const laterRounds = ROUNDS.filter((r) => tm.rounds[r].status !== "open");
+
+  if (removed) {
+    return (
+      <div className="mx-auto mt-16 max-w-xl">
+        <Card>
+          <h1 className="mb-2 text-xl font-bold">{config.title}</h1>
+          <p className="text-sm text-slate-700">
+            Your instructor has removed you from this session, so this login code no longer works. If that is not
+            what you expected, contact them directly — nobody here can restore it for you.
+          </p>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">

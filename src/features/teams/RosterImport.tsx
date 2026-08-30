@@ -18,7 +18,7 @@ import {
   type Membership,
 } from "./allocationTeams";
 import { buildProvisioning, resolveRoster, type ResolvedTeam } from "./provision";
-import { Button, Card, ErrorText, Spinner } from "../../components/ui";
+import { Button, Card, ConfirmDialog, ErrorText, Spinner } from "../../components/ui";
 import { UnlockPanel } from "../sessions/UnlockPanel";
 import type { Allocation, TeamDirectory, TeamMgmtConfig } from "../../types";
 
@@ -69,6 +69,7 @@ export function RosterImport({
   const [allocation, setAllocation] = useState<AllocationState>({ name: "loading" });
   const [error, setError] = useState("");
   const [showUnlock, setShowUnlock] = useState(false);
+  const [confirmPartial, setConfirmPartial] = useState<ResolvedTeam[] | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const labels = useMemo(() => teamLabels(session, projects), [session, projects]);
@@ -209,6 +210,7 @@ export function RosterImport({
 
   if (stage.name === "preview") {
     const teamedCount = stage.teams.reduce((n, t) => n + t.members.length, 0);
+    const missing = students.length - teamedCount;
     return (
       <Card>
         <h3 className="mb-2 font-semibold">Review the roster</h3>
@@ -273,13 +275,42 @@ export function RosterImport({
         </div>
         <ErrorText>{error}</ErrorText>
         <div className="flex gap-2">
-          <Button onClick={() => provision(stage.teams)} disabled={stage.teams.length === 0}>
+          <Button
+            onClick={() =>
+              // A file that covers only part of the class deletes every team it
+              // does not mention, contracts and display names included. That was
+              // always true, but adding students now hands the instructor a
+              // second, smaller CSV — so picking the wrong one is suddenly easy.
+              missing > 0 ? setConfirmPartial(stage.teams) : provision(stage.teams)
+            }
+            disabled={stage.teams.length === 0}
+          >
             Provision {stage.teams.length} teams
           </Button>
           <Button variant="secondary" onClick={() => setStage({ name: "idle" })}>
             Choose a different file
           </Button>
         </div>
+        <ConfirmDialog
+          open={confirmPartial != null}
+          title={`This file leaves out ${missing} student${missing === 1 ? "" : "s"}`}
+          confirmLabel="Provision anyway"
+          onCancel={() => setConfirmPartial(null)}
+          onConfirm={() => {
+            const teams = confirmPartial;
+            setConfirmPartial(null);
+            if (teams) void provision(teams);
+          }}
+        >
+          <p>
+            This session has {students.length} students, and this file accounts for {teamedCount}. Any team left
+            with no members here is deleted — along with its contract and everyone&rsquo;s chosen display names.
+          </p>
+          <p>
+            If you just added students, upload the <strong>master codes CSV with the new rows appended</strong>,
+            not the file of new codes on its own.
+          </p>
+        </ConfirmDialog>
       </Card>
     );
   }

@@ -32,7 +32,12 @@ function answers(rater: number, overrides: Partial<PeerEvalAnswers> = {}): PeerE
 }
 
 /** column index -> header name, for readable assertions */
-const COL = { team: 0, rater: 1, ratee: 2, points: 3, justification: 4, comment: 5 };
+const COL = { team: 0, rater: 1, ratee: 2, points: 3, submitted: 4, justification: 5, comment: 6 };
+
+/** The export takes both the scored and the as-submitted ballot. These fixtures
+ * predate reconciliation, where the two are the same. */
+const asPairs = (m: Map<string, PeerEvalAnswers>) =>
+  new Map([...m].map(([h, a]) => [h, { scored: a, submitted: a }] as const));
 
 describe("buildDetailRows", () => {
   it("keeps the comment of the team's first member, which used to be dropped", () => {
@@ -44,7 +49,7 @@ describe("buildDetailRows", () => {
       ["h2", answers(2, { commentToInstructor: "Ben's private note." })],
       ["h3", answers(3, { commentToInstructor: "Cara's private note." })],
     ]);
-    const rows = buildDetailRows(TEAMS, byRater, NICKNAMES);
+    const rows = buildDetailRows(TEAMS, asPairs(byRater), NICKNAMES);
     const comments = rows.slice(1).map((r) => String(r[COL.comment])).filter(Boolean);
     expect(comments.sort()).toEqual([
       "Ana's private note.",
@@ -55,7 +60,7 @@ describe("buildDetailRows", () => {
 
   it("writes each comment exactly once, on that rater's first row", () => {
     const byRater = new Map([["h1", answers(1, { commentToInstructor: "Only once." })]]);
-    const rows = buildDetailRows(TEAMS, byRater, NICKNAMES).slice(1);
+    const rows = buildDetailRows(TEAMS, asPairs(byRater), NICKNAMES).slice(1);
     expect(rows).toHaveLength(2); // Ana rates Ben and Cara
     expect(rows[0][COL.comment]).toBe("Only once.");
     expect(rows[1][COL.comment]).toBe("");
@@ -67,14 +72,14 @@ describe("buildDetailRows", () => {
       ["h2", answers(2)],
       ["h3", answers(3)],
     ]);
-    const rows = buildDetailRows(TEAMS, byRater, NICKNAMES).slice(1);
+    const rows = buildDetailRows(TEAMS, asPairs(byRater), NICKNAMES).slice(1);
     expect(rows).toHaveLength(6); // 3 raters x 2 teammates
     for (const r of rows) expect(r[COL.rater]).not.toBe(r[COL.ratee]);
   });
 
   it("skips raters who did not submit, without disturbing the others", () => {
     const byRater = new Map([["h2", answers(2, { commentToInstructor: "Ben was here." })]]);
-    const rows = buildDetailRows(TEAMS, byRater, NICKNAMES).slice(1);
+    const rows = buildDetailRows(TEAMS, asPairs(byRater), NICKNAMES).slice(1);
     expect(rows).toHaveLength(2);
     expect(rows.every((r) => r[COL.rater] === "Ben")).toBe(true);
     expect(rows[0][COL.comment]).toBe("Ben was here.");
@@ -84,7 +89,7 @@ describe("buildDetailRows", () => {
     const byRater = new Map([
       ["h1", answers(1, { points: { "2": 70, "3": 30 }, justifications: { "2": "Carried the build." } })],
     ]);
-    const rows = buildDetailRows(TEAMS, byRater, NICKNAMES).slice(1);
+    const rows = buildDetailRows(TEAMS, asPairs(byRater), NICKNAMES).slice(1);
     const ben = rows.find((r) => r[COL.ratee] === "Ben")!;
     const cara = rows.find((r) => r[COL.ratee] === "Cara")!;
     expect(ben[COL.points]).toBe(70);
@@ -94,14 +99,14 @@ describe("buildDetailRows", () => {
 
   it("falls back to the code index before a student picks a display name", () => {
     const byRater = new Map([["h1", answers(1)]]);
-    const rows = buildDetailRows(TEAMS, byRater, {}).slice(1);
+    const rows = buildDetailRows(TEAMS, asPairs(byRater), {}).slice(1);
     expect(rows[0][COL.rater]).toBe("#1");
     expect(rows[0][COL.ratee]).toBe("#2");
   });
 
   it("treats a whitespace-only comment as no comment", () => {
     const byRater = new Map([["h1", answers(1, { commentToInstructor: "   " })]]);
-    const rows = buildDetailRows(TEAMS, byRater, NICKNAMES).slice(1);
+    const rows = buildDetailRows(TEAMS, asPairs(byRater), NICKNAMES).slice(1);
     expect(rows[0][COL.comment]).toBe("");
   });
 });
@@ -136,5 +141,20 @@ describe("buildSummaryRows", () => {
     expect(rows[0].slice(-2)).toEqual(["behaviorAvg1", "behaviorAvg2"]);
     // No behavior ratings were submitted, so the cells are blank, not zeroes.
     expect(rows[1].slice(-2)).toEqual(["", ""]);
+  });
+
+  it("keeps a departed ratee's row, with what was written but nothing scored", () => {
+    // #3 left the session after this ballot was submitted. What #1 said about
+    // them is part of the record and must still export; the scored column is
+    // blank because their points were redistributed across the survivors.
+    const submitted = answers(1, { points: { "2": 40, "3": 60 } });
+    const scored = answers(1, { points: { "2": 100 } });
+    const rows = buildDetailRows(TEAMS, new Map([["h1", { scored, submitted }]]), NICKNAMES).slice(1);
+    const departed = rows.find((r) => r[COL.ratee] === "Cara")!;
+    expect(departed[COL.submitted]).toBe(60);
+    expect(departed[COL.points]).toBe("");
+    const kept = rows.find((r) => r[COL.ratee] === "Ben")!;
+    expect(kept[COL.submitted]).toBe(40);
+    expect(kept[COL.points]).toBe(100);
   });
 });

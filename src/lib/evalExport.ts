@@ -74,27 +74,43 @@ export function buildSummaryRows(
  * never rates themselves, so exactly one student per team had their private
  * note to the instructor silently dropped from the export.
  */
+/**
+ * Rows walk the directory's members, not the surviving ones, so a student who
+ * left the session still appears as a ratee. What the rater wrote about them is
+ * part of the record, and dropping the row would hide it.
+ *
+ * Two point columns, because after a departure they genuinely differ:
+ * `pointsAsSubmitted` is what the student typed, and `points` is what was
+ * scored after the ballot was reconciled to the teammates who remain. A departed
+ * ratee has the first and not the second, which is exactly the right reading.
+ */
 export function buildDetailRows(
   teams: TeamDirectory["teams"],
-  byRater: Map<string, PeerEvalAnswers>,
+  byRater: Map<string, { scored: PeerEvalAnswers; submitted: PeerEvalAnswers }>,
   nicknames: Nicknames,
 ): CsvRow[] {
-  const rows: CsvRow[] = [["team", "rater", "ratee", "points", "justification", "comment"]];
+  const rows: CsvRow[] = [
+    ["team", "rater", "ratee", "points", "pointsAsSubmitted", "justification", "comment"],
+  ];
 
   for (const team of teams) {
     for (const rater of team.members) {
-      const ans = byRater.get(rater.codeHash);
-      if (!ans) continue;
-      let commentPending = ans.commentToInstructor?.trim() ?? "";
+      const entry = byRater.get(rater.codeHash);
+      if (!entry) continue;
+      const { scored, submitted } = entry;
+      let commentPending = submitted.commentToInstructor?.trim() ?? "";
 
       for (const ratee of team.members) {
         if (ratee.codeIndex === rater.codeIndex) continue;
+        const key = String(ratee.codeIndex);
+        const scoredPoints = scored.points[key];
         rows.push([
           team.label,
           displayName(rater.codeIndex, nicknames),
           displayName(ratee.codeIndex, nicknames),
-          ans.points[String(ratee.codeIndex)] ?? "",
-          ans.justifications[String(ratee.codeIndex)] ?? "",
+          typeof scoredPoints === "number" ? Number(scoredPoints.toFixed(2)) : "",
+          submitted.points[key] ?? "",
+          submitted.justifications[key] ?? "",
           commentPending,
         ]);
         commentPending = ""; // only on this rater's first row

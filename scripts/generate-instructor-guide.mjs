@@ -136,7 +136,8 @@ p("A session moves through these stages. You can revisit earlier stages until yo
 bullets(
   [
     "Register and get approved — sign up with your university email; an administrator approves your account.",
-    "Create a session — set student count, team sizes, and an encryption passphrase. You download two files once.",
+    "Create a session — set student count, team sizes, and an encryption passphrase. You download two files once. " +
+      "The count is a starting point, not a commitment: students can be added and removed later on the Roster tab.",
     "Define projects (optional) — describe each project and any attribute requirements (e.g. “needs >=1 CS major”).",
     "Build the survey — add demographic, skill, and preference questions, often from built-in standard scales.",
     "Set constraints — choose which rules matter and how strongly (Must / Important / Nice to have).",
@@ -149,7 +150,8 @@ bullets(
 );
 note(
   "Tabs you will use",
-  "Inside a session: Overview (status, invite text, delete) · Projects · Survey · Constraints · Responses (completion) · " +
+  "Inside a session: Overview (status, invite text, delete) · Projects · Survey · Constraints · Roster (completion, " +
+    "adding and removing students) · " +
     "Allocation (optimize & export) · Privacy & data (erase). A “Projects” tab appears only for sessions with named projects; " +
     "“Teams” and “Peer evals” tabs appear once you enable the optional team-management phase (§11).",
 );
@@ -297,11 +299,35 @@ note(
 // ----------------------------------------------------------------------------
 // 8. Tracking responses
 // ----------------------------------------------------------------------------
-h1("8. Tracking responses");
+h1("8. The roster: tracking responses, adding and removing students");
 p(
-  "The Responses tab shows completion by student index (never by name — the platform doesn't have names). Use it to see " +
+  "The Roster tab shows completion by student index (never by name — the platform doesn't have names). Use it to see " +
     "who still needs a reminder. You cannot read individual answers here; they stay encrypted until you unlock them on " +
     "the Allocation tab.",
+);
+
+h3("Students who join or drop after you created the session");
+p(
+  "Enrollment moves for the first weeks of term, and teams have to be assigned before it settles. You do not have to " +
+    "guess the final number when you create the session, and you do not have to start over when it changes.",
+);
+bullets([
+  "Add students: choose how many and press Add. You get a small CSV of their login codes, in the same columns as the " +
+    "file you downloaded at creation. Append those rows to your master copy — the codes are shown once here too, and " +
+    "cannot be recovered afterwards.",
+  "Remove students: select their tiles and press Remove. Their record and any survey response are deleted, and their " +
+    "login code stops working immediately.",
+  "Student numbers are never reused. If you remove #14 and later add someone, they get the next unused number, not 14. " +
+    "The number is what identifies a student inside the encrypted team rosters and peer evaluations, so reusing it " +
+    "would silently attach the newcomer to the previous holder's history.",
+]);
+note(
+  "What to redo after a roster change",
+  "Anything already worked out from the roster is now out of date, and TeamForge says so rather than quietly using it. " +
+    "If you had saved an allocation, re-run the optimizer and save. If you had provisioned teams, re-upload your " +
+    "login-codes CSV on the Teams tab — that is what removes a departed student from their teammates' contract and " +
+    "peer-evaluation form. Upload the master file with the new rows appended, never the small file of new codes on " +
+    "its own: a file that covers only part of the class deletes every team it does not mention.",
 );
 
 // ----------------------------------------------------------------------------
@@ -406,6 +432,10 @@ const faq = [
   ["“Awaiting approval” after registering.", "Your email is verified but an administrator hasn't approved you yet. You can't create sessions until then."],
   ["I forgot my passphrase.", "Unlock with the recovery key file instead (Allocation tab). Then consider re-creating the session with a passphrase you'll remember."],
   ["I lost both the passphrase and recovery key.", "The student answers are permanently unreadable — by design. Re-open the survey with new codes if you must collect again."],
+  ["A student joined the class in week 2.", "Roster tab, Add. You get their login code in a small CSV — append those rows to your master codes file. If you had already saved an allocation or provisioned teams, redo those: the app flags both as out of date, and re-running the optimizer is what actually gives the newcomer a team."],
+  ["A student dropped the class.", "Roster tab: select their tile and Remove. Their record and response are deleted and their code stops working. If teams were already provisioned, re-upload your codes CSV on the Teams tab — until you do, their teammates still see them on the contract and the peer-evaluation form. Their number is retired and will not be handed to anyone else."],
+  ["I removed a student mid-way through a peer-evaluation round. Did I ruin it?", "No. Ballots already submitted are kept: the points allocated to the departed student are dropped and the rest scaled back up to 100, so what each rater said about the teammates who remain is preserved exactly. The review screen lists which ballots were adjusted, and the detail CSV shows both what was submitted and what was scored."],
+  ["Can a student I removed still get at their old team's contract?", "Possibly, and it is worth knowing. Their login stops working at once, but a team's documents are reached by holding an unguessable token, and if they had already logged in they may still hold it. To cut that off, re-upload the roster giving that team a different label — that mints a new key. It also starts that team's contract and display names over, so it is a deliberate trade rather than something to do routinely."],
   ["A student says their code isn't recognized.", "Check for typos; codes are case-insensitive and tolerant of dashes/spaces. Make sure they're using their login code, not a share code, and that the survey is Open."],
   ["The same category appears twice (e.g. “Woman” and “Female”).", "Use the standard-scale dropdown for both the survey option and the project requirement value so they match exactly; remove the stray option from the survey question."],
   ["The optimizer won't finish / says the problem is large.", "Raise the time limit, reduce the number of teams, or relax some Must constraints to Important."],

@@ -191,3 +191,107 @@ export function validateSubmittedBallot(
   }
   return [...problems, ...validatePeerEval(answers, expected.teammateCodeIndexes, config)];
 }
+
+/**
+ * A ballot restricted to the teammates who are still on the team.
+ *
+ * A student can leave mid-round. Their teammates' ballots were written against
+ * the roster as it stood, so they allocate part of their 100 points to someone
+ * who is now gone. Scoring those ballots as-is would read every surviving
+ * allocation against a *smaller* even split and drag the whole team down;
+ * rejecting them (which is what used to happen) threw away the team's real
+ * ratings entirely and imputed an even split for everyone.
+ *
+ * So: drop the departed allocations and scale the rest back up to 100. That
+ * preserves exactly what the rater expressed about the people still there —
+ * 40:30 stays 40:30 — and leaves the factor formula itself untouched.
+ *
+ * This runs *after* validation, never before. Validation compares a ballot
+ * against the roster it was written for; renormalizing first would make the
+ * justification rule fire on numbers the student never typed (60/20/20 becomes
+ * 75/25, outside the two-teammate dead band, with no justification attached) and
+ * the ballot would be rejected for the app's own arithmetic.
+ */
+export interface ReconciledBallot {
+  /** The ballot as it should be scored. Deep-equal to the input when nothing
+   * was dropped, so the ordinary path is provably untouched. */
+  answers: PeerEvalAnswers;
+  dropped: { codeIndex: number; points: number }[];
+  /** Every surviving allocation was zero (or there is nobody left to rate), so
+   * there is no relative judgment to preserve. The caller must impute an even
+   * split rather than scale by zero. */
+  noOpinion: boolean;
+}
+
+/**
+ * Exact proportional shares — deliberately *not* rounded to whole points.
+ *
+ * Rounding here amplifies the rounding already in the ballot. On a team of nine,
+ * an even split is 13/13/13/13/12/12/12/12; drop one teammate and
+ * largest-remainder apportionment turns that into 15/15/15/15/14/13/13, and 13
+ * against a neutral share of 14.29 is 0.91 — outside the dead band. A rater who
+ * accepted the form's default would have pushed two teammates below 1.00, which
+ * is precisely what the dead band exists to prevent.
+ *
+ * Exact shares keep every survivor inside the band: 12/88 of 100 is 13.64, or
+ * 0.954 of neutral. The whole-number rule is not weakened by this, because the
+ * reconciled ballot is never validated — validation runs first, against the raw
+ * ballot — and the instructor's detail CSV exports the raw ballot too. The only
+ * consumer of these numbers is computeTeamFactors, which divides by the neutral
+ * share and wants the exact value.
+ */
+export function reconcileBallot(
+  answers: PeerEvalAnswers,
+  teammateCodeIndexes: number[],
+): ReconciledBallot {
+  const current = new Set(teammateCodeIndexes.map(String));
+  const points = answers.points ?? {};
+  const dropped: { codeIndex: number; points: number }[] = [];
+  for (const [key, value] of Object.entries(points)) {
+    if (current.has(key)) continue;
+    if (typeof value === "number" && Number.isFinite(value)) {
+      dropped.push({ codeIndex: Number(key), points: value });
+    }
+  }
+  if (dropped.length === 0) return { answers, dropped: [], noOpinion: false };
+
+  const surviving = teammateCodeIndexes
+    .map((idx) => ({ codeIndex: idx, value: points[String(idx)] }))
+    .filter((p): p is { codeIndex: number; value: number } =>
+      typeof p.value === "number" && Number.isFinite(p.value),
+    );
+  const total = surviving.reduce((a, p) => a + p.value, 0);
+  dropped.sort((a, b) => a.codeIndex - b.codeIndex);
+  if (surviving.length === 0 || total <= 0) {
+    return { answers, dropped, noOpinion: true };
+  }
+
+  const nextPoints: Record<string, number> = {};
+  for (const p of surviving) nextPoints[String(p.codeIndex)] = (p.value * 100) / total;
+
+  // Justifications survive verbatim. Re-pruning them against the renormalized
+  // numbers would delete a sentence the student wrote, because our own
+  // arithmetic moved the value back inside the dead band.
+  const justifications: Record<string, string> = {};
+  for (const idx of teammateCodeIndexes) {
+    const text = answers.justifications?.[String(idx)];
+    if (text) justifications[String(idx)] = text;
+  }
+
+  // Behaviour ratings are absolute 1-5 judgments, not a budget: pruned to the
+  // remaining teammates, never rescaled.
+  let behaviorRatings: Record<string, number[]> | undefined;
+  if (answers.behaviorRatings) {
+    behaviorRatings = {};
+    for (const idx of teammateCodeIndexes) {
+      const r = answers.behaviorRatings[String(idx)];
+      if (r) behaviorRatings[String(idx)] = r;
+    }
+  }
+
+  return {
+    answers: { ...answers, points: nextPoints, justifications, behaviorRatings },
+    dropped,
+    noOpinion: false,
+  };
+}

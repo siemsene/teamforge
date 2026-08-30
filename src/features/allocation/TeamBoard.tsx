@@ -88,18 +88,30 @@ export function TeamBoard({
       </Card>
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {input.teams.map((team) => (
-          <TeamCard
-            key={team.id}
-            id={team.id}
-            title={team.name}
-            subtitle={`${(assignment[team.id] ?? []).length} members (${team.minSize}–${team.maxSize}, ideal ${input.idealTeamSize})`}
-            members={(assignment[team.id] ?? []).map((h) => byHash.get(h)).filter((s): s is SolverStudent => !!s)}
-            violations={evaluation.byTeam[team.id] ?? []}
-            input={input}
-            onMove={move}
-          />
-        ))}
+        {input.teams.map((team) => {
+          const placed = assignment[team.id] ?? [];
+          const members = placed.map((h) => byHash.get(h)).filter((s): s is SolverStudent => !!s);
+          // A hash the allocation still places for a student who has since been
+          // removed resolves to nobody. Count what is actually shown, and say
+          // that the rest are gone — the count used to include them, so a card
+          // read "5 members" above four chips with nothing to explain it.
+          const gone = placed.length - members.length;
+          return (
+            <TeamCard
+              key={team.id}
+              id={team.id}
+              title={team.name}
+              subtitle={
+                `${members.length} members (${team.minSize}–${team.maxSize}, ideal ${input.idealTeamSize})` +
+                (gone > 0 ? ` · ${gone} removed from the session` : "")
+              }
+              members={members}
+              violations={evaluation.byTeam[team.id] ?? []}
+              input={input}
+              onMove={move}
+            />
+          );
+        })}
         {unassigned.length > 0 && (
           <TeamCard
             id={UNASSIGNED}

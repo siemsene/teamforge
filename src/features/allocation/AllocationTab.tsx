@@ -10,6 +10,7 @@ import type { Allocation, SurveyAnswers } from "../../types";
 import { Button, Card, ErrorText, Field, NumberInput, Spinner } from "../../components/ui";
 import { TeamBoard } from "./TeamBoard";
 import { getSessionReadiness } from "../sessions/readiness";
+import { allocationDrift } from "../sessions/rosterStaleness";
 import { UnlockPanel } from "../sessions/UnlockPanel";
 
 /** Order-independent fingerprint of an assignment, for comparing against the
@@ -50,7 +51,7 @@ export function AllocationTab() {
   const [unmatchedCodes, setUnmatchedCodes] = useState<{ codeIndex: number; codes: string[] }[]>([]);
   const workerRef = useRef<Worker | null>(null);
   const [timeLimit, setTimeLimit] = useState(60);
-  const readiness = useMemo(() => getSessionReadiness(session, publicConfig, projects), [session, publicConfig, projects]);
+  const readiness = useMemo(() => getSessionReadiness(session, publicConfig, projects, students.length), [session, publicConfig, projects, students.length]);
 
   const teams: SolverTeam[] = useMemo(() => {
     if (session.genericProjects) {
@@ -90,6 +91,13 @@ export function AllocationTab() {
 
   const dirty = assignment != null && stableKey(assignment) !== savedAssignment;
 
+  // Exact, not a timestamp: this tab holds both the live roster and the
+  // decrypted assignment, so it can name who is adrift and in which direction.
+  const drift = useMemo(
+    () => (assignment ? allocationDrift(students, assignment) : null),
+    [students, assignment],
+  );
+
   // Reloads and tab closes are the browser's to warn about; in-app navigation is
   // handled by the banner on the board itself.
   useEffect(() => {
@@ -100,6 +108,21 @@ export function AllocationTab() {
   }, [dirty]);
 
   useEffect(() => () => workerRef.current?.terminate(), []);
+
+  // Students can be added or removed while this tab is open. Re-derive the
+  // solver input when that happens (or when someone submits), but leave the
+  // board alone — the instructor may be part-way through moving people.
+  const rosterKey = students.map((s) => `${s.hash}:${s.submittedAt ?? 0}`).join("|");
+  const lastRosterKey = useRef("");
+  useEffect(() => {
+    if (!privateKeyRef.current || !solverStudents) return;
+    if (lastRosterKey.current === rosterKey) return;
+    lastRosterKey.current = rosterKey;
+    void decryptStudents(privateKeyRef.current).catch((e) =>
+      setError(e instanceof Error ? e.message : String(e)),
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rosterKey]);
 
   // If another tab already unlocked this session, decrypt immediately.
   const decryptedRef = useRef(false);
@@ -113,50 +136,62 @@ export function AllocationTab() {
 
   // ---------- unlock & decrypt ----------
 
+  /**
+   * Decrypt every student's response into solver input.
+   *
+   * Separate from `unlocked` because the roster is no longer fixed once the
+   * session exists: a student added (or removed) after the instructor unlocked
+   * must reach the solver, and re-running the whole unlock would reload the
+   * saved allocation over whatever they were dragging.
+   */
+  async function decryptStudents(privateKey: CryptoKey) {
+    const teammatesQ = publicConfig.questions.find((q) => q.kind === "teammates");
+    // Students list classmates by their public share code; map those to the
+    // classmate's student hash so the solver can pair them.
+    const shareToHash = new Map(
+      students.filter((s) => s.shareCode).map((s) => [normalizeCode(s.shareCode!), s.hash]),
+    );
+    const decrypted: SolverStudent[] = [];
+    const problems: ResponseProblem[] = [];
+    const unmatched: { codeIndex: number; codes: string[] }[] = [];
+    for (const s of students) {
+      let answers: SurveyAnswers = {};
+      if (s.response) {
+        try {
+          answers = JSON.parse(await eciesDecrypt(privateKey, s.response)) as SurveyAnswers;
+          if (teammatesQ && Array.isArray(answers[teammatesQ.id])) {
+            const entered = answers[teammatesQ.id] as string[];
+            const resolved = entered.map((code) => ({ code, hash: shareToHash.get(normalizeCode(code)) }));
+            // A mistyped share code used to be dropped in silence: the student
+            // believed their preference was recorded and the instructor never
+            // learned it had gone. Neither can act on what nobody is told.
+            const missed = resolved.filter((r) => !r.hash).map((r) => r.code);
+            if (missed.length > 0) unmatched.push({ codeIndex: s.codeIndex, codes: missed });
+            answers[teammatesQ.id] = resolved
+              .map((r) => r.hash)
+              .filter((h): h is string => Boolean(h));
+          }
+        } catch (err) {
+          problems.push({
+            codeIndex: s.codeIndex,
+            message: err instanceof Error ? err.message : "Could not decrypt or parse this response.",
+          });
+        }
+      }
+      decrypted.push({ hash: s.hash, codeIndex: s.codeIndex, answers, submitted: !!s.submittedAt });
+    }
+    setSolverStudents(decrypted);
+    setResponseProblems(problems);
+    setUnmatchedCodes(unmatched);
+  }
+
   async function unlocked(privateKey: CryptoKey) {
     privateKeyRef.current = privateKey;
     if (!sessionKey) setSessionKey(privateKey);
     setPhase({ name: "decrypting" });
     setError("");
     try {
-      const teammatesQ = publicConfig.questions.find((q) => q.kind === "teammates");
-      // Students list classmates by their public share code; map those to the
-      // classmate's student hash so the solver can pair them.
-      const shareToHash = new Map(
-        students.filter((s) => s.shareCode).map((s) => [normalizeCode(s.shareCode!), s.hash]),
-      );
-      const decrypted: SolverStudent[] = [];
-      const problems: ResponseProblem[] = [];
-      const unmatched: { codeIndex: number; codes: string[] }[] = [];
-      for (const s of students) {
-        let answers: SurveyAnswers = {};
-        if (s.response) {
-          try {
-            answers = JSON.parse(await eciesDecrypt(privateKey, s.response)) as SurveyAnswers;
-            if (teammatesQ && Array.isArray(answers[teammatesQ.id])) {
-              const entered = answers[teammatesQ.id] as string[];
-              const resolved = entered.map((code) => ({ code, hash: shareToHash.get(normalizeCode(code)) }));
-              // A mistyped share code used to be dropped in silence: the student
-              // believed their preference was recorded and the instructor never
-              // learned it had gone. Neither can act on what nobody is told.
-              const missed = resolved.filter((r) => !r.hash).map((r) => r.code);
-              if (missed.length > 0) unmatched.push({ codeIndex: s.codeIndex, codes: missed });
-              answers[teammatesQ.id] = resolved
-                .map((r) => r.hash)
-                .filter((h): h is string => Boolean(h));
-            }
-          } catch (err) {
-            problems.push({
-              codeIndex: s.codeIndex,
-              message: err instanceof Error ? err.message : "Could not decrypt or parse this response.",
-            });
-          }
-        }
-        decrypted.push({ hash: s.hash, codeIndex: s.codeIndex, answers, submitted: !!s.submittedAt });
-      }
-      setSolverStudents(decrypted);
-      setResponseProblems(problems);
-      setUnmatchedCodes(unmatched);
+      await decryptStudents(privateKey);
 
       // Load a previously saved allocation if there is one.
       const saved = await getAllocationDoc(sid);
@@ -317,6 +352,27 @@ export function AllocationTab() {
         {phase.name === "solving" && <Spinner label={phase.message} />}
         <ErrorText>{error}</ErrorText>
         {info && <p className="mt-2 text-sm text-green-700">{info}</p>}
+        {drift && (drift.unassignedCodeIndexes.length > 0 || drift.ghostHashes.length > 0) && (
+          <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+            <p className="font-medium">The roster has changed since this allocation was worked out.</p>
+            {drift.unassignedCodeIndexes.length > 0 && (
+              <p className="mt-1">
+                {drift.unassignedCodeIndexes.length === 1 ? "Student" : "Students"}{" "}
+                {drift.unassignedCodeIndexes.map((i) => `#${i}`).join(", ")}{" "}
+                {drift.unassignedCodeIndexes.length === 1 ? "was" : "were"} added and{" "}
+                {drift.unassignedCodeIndexes.length === 1 ? "is" : "are"} on no team yet.
+              </p>
+            )}
+            {drift.ghostHashes.length > 0 && (
+              <p className="mt-1">
+                {drift.ghostHashes.length} student{drift.ghostHashes.length === 1 ? "" : "s"} placed by this
+                allocation {drift.ghostHashes.length === 1 ? "has" : "have"} been removed from the session. Their
+                {drift.ghostHashes.length === 1 ? " seat is" : " seats are"} still counted until you re-run.
+              </p>
+            )}
+            <p className="mt-1">Re-run the optimizer (or move the rest by hand) and save before announcing teams.</p>
+          </div>
+        )}
         {responseProblems.length > 0 && (
           <div className="mt-2 rounded-md bg-amber-50 p-3 text-sm text-amber-900">
             <p className="font-medium">

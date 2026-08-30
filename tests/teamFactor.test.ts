@@ -544,3 +544,38 @@ describe("publication thresholds", () => {
     expect(1 - (1 - g) / p.damping - p.deadband).toBeCloseTo(0.8, 10);
   });
 });
+
+describe("a team that lost a member", () => {
+  it("gives the last member left a factor of 1.00 rather than a NaN", () => {
+    const out = computeTeamFactors(
+      { teamLabel: "Team 1", memberCodeIndexes: [1], submissions: [] },
+      DEFAULT_FACTOR_PARAMS,
+    );
+    expect(out.members).toHaveLength(1);
+    expect(out.members[0].factor).toBe(1);
+    expect(out.members[0].neutralShare).toBe(100);
+    expect(out.members[0].flags).toContain("noRatings");
+    expect(Number.isNaN(out.teamMean)).toBe(false);
+  });
+
+  it("submittedButNeutralized clears noSubmission without moving any factor", () => {
+    // A rater whose whole allocation went to teammates who have since left is
+    // imputed an even split, exactly like silence — but they did submit, and
+    // flagging them as a non-submitter would send the instructor after the wrong
+    // student. The flag must be the only thing that changes.
+    const team = {
+      teamLabel: "Team 1",
+      memberCodeIndexes: [1, 2, 3],
+      submissions: [
+        { round: "summative", raterCodeIndex: 2, teamLabel: "Team 1", points: { "1": 50, "3": 50 }, justifications: {} },
+        { round: "summative", raterCodeIndex: 3, teamLabel: "Team 1", points: { "1": 50, "2": 50 }, justifications: {} },
+      ] as PeerEvalAnswers[],
+    };
+    const without = computeTeamFactors(team, DEFAULT_FACTOR_PARAMS);
+    const with_ = computeTeamFactors({ ...team, submittedButNeutralized: [1] }, DEFAULT_FACTOR_PARAMS);
+
+    expect(with_.members.map((m) => m.factor)).toEqual(without.members.map((m) => m.factor));
+    expect(without.members[0].flags).toContain("noSubmission");
+    expect(with_.members[0].flags).not.toContain("noSubmission");
+  });
+});

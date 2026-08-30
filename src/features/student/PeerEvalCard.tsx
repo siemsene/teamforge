@@ -57,6 +57,22 @@ export function PeerEvalCard({
     );
   }
 
+  // A team can end up with one member left — teammates dropped the class, and
+  // the instructor re-provisioned. The form would render no rows, the total
+  // could never reach 100, and the validator would answer "You have no teammates
+  // to evaluate." Say that plainly instead of showing a form nobody can submit.
+  if (roster.teammates.length === 0) {
+    return (
+      <Card>
+        <h2 className="mb-1 font-semibold">{ROUND_TITLE[round]}</h2>
+        <p className="text-sm text-slate-600">
+          There is nobody else on your team to evaluate, so there is nothing for you to fill in this round. Your own
+          factor is unaffected.
+        </p>
+      </Card>
+    );
+  }
+
   async function submit(answers: PeerEvalAnswers) {
     setBusy(true);
     setError("");

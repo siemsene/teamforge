@@ -5,7 +5,7 @@ import { eciesDecrypt, fromBase64 } from "../../lib/crypto";
 import { importMemberKey, sealEnvelope } from "../../lib/memberKey";
 import { openDirectoryNicknames } from "../../lib/nicknames";
 import { publicTeamMgmt } from "../teams/contractTemplate";
-import { validateSubmittedBallot } from "../../lib/evalValidation";
+import { reconcileBallot, validateSubmittedBallot } from "../../lib/evalValidation";
 import { downloadFile, sessionFilename, toCsv } from "../../lib/util";
 import { buildDetailRows, buildSummaryRows } from "../../lib/evalExport";
 import {
@@ -32,7 +32,18 @@ interface RejectedBallot {
   teamLabel: string;
   reasons: string[];
 }
+
+/** A ballot that was scored after being reconciled to the surviving team. */
+interface AdjustedBallot {
+  raterCodeIndex: number;
+  teamLabel: string;
+  dropped: { codeIndex: number; points: number }[];
+  /** Everything they allocated went to teammates who have left, so an even
+   * split was imputed for them instead. */
+  neutralized: boolean;
+}
 import { UnlockPanel } from "../sessions/UnlockPanel";
+import { rosterStaleness } from "../sessions/rosterStaleness";
 
 export function EvalReview() {
   const { sid, session, students, sessionKey, setSessionKey } = useSession();
@@ -47,9 +58,19 @@ export function EvalReview() {
         EvalRoundId,
         {
           directory: TeamDirectory;
-          byRater: Map<string, PeerEvalAnswers>;
+          /** `scored` is reconciled to the surviving team; `submitted` is what
+           * the student actually wrote, kept for the detail export. */
+          byRater: Map<string, { scored: PeerEvalAnswers; submitted: PeerEvalAnswers }>;
+          /** Members of each team who are still on the roster, keyed by label.
+           * A student removed since provisioning is in the directory but not
+           * here, and must not be rated, scored or published to. */
+          currentByLabel: Map<string, TeamDirectory["teams"][number]["members"]>;
           /** Ballots excluded by the instructor-side re-check. */
           rejected: RejectedBallot[];
+          /** Ballots kept, but rescored across the teammates who remain. */
+          adjusted: AdjustedBallot[];
+          /** Raters whose ballot carried no usable opinion after reconciling. */
+          neutralized: number[];
           nicknames: Nicknames;
           /** Submissions at the moment this was computed, to spot staleness. */
           computedFrom: number;
@@ -62,6 +83,7 @@ export function EvalReview() {
   const [error, setError] = useState("");
   const [info, setInfo] = useState("");
 
+  const stale = rosterStaleness(session, null);
   const roundField = round === "formative" ? "peerEvalFormative" : "peerEvalSummative";
   const submittedHashes = useMemo(
     () => new Set(students.filter((s) => s[roundField]).map((s) => s.hash)),
@@ -78,15 +100,34 @@ export function EvalReview() {
       if (!dirDoc) throw new Error("No team directory — re-provision the roster on the Teams tab.");
       const directory = JSON.parse(await eciesDecrypt(sessionKey, dirDoc.payload)) as TeamDirectory;
 
+      // A student can be removed from the session between provisioning and this
+      // review. The directory still lists them, so it stays the record of the
+      // roster each ballot was *written* against; the live student collection is
+      // who is still here. Both are needed, and for different questions.
+      const liveHashes = new Set(students.map((s) => s.hash));
+      const currentByLabel = new Map<string, TeamDirectory["teams"][number]["members"]>();
+      for (const team of directory.teams) {
+        currentByLabel.set(team.label, team.members.filter((m) => liveHashes.has(m.codeHash)));
+      }
+
       // Who each rater's ballot is allowed to talk about, from the roster we
       // hold — never from anything the ballot asserts about itself.
+      //
+      // Validation uses the roster as provisioned, plus any index retired since,
+      // because that is what the student had in front of them. Judging a ballot
+      // against a roster that changed after they submitted it would reject an
+      // honest answer for our bookkeeping. Reconciliation to the survivors
+      // happens after, never before — renormalizing first would make the
+      // justification rule fire on numbers the student never typed.
+      const retired = new Set(session.retiredCodeIndexes ?? []);
       const expectedByHash = new Map<string, { raterCodeIndex: number; teammateCodeIndexes: number[]; teamLabel: string }>();
       for (const team of directory.teams) {
         for (const m of team.members) {
+          const known = team.members.filter((o) => o.codeIndex !== m.codeIndex).map((o) => o.codeIndex);
           expectedByHash.set(m.codeHash, {
             raterCodeIndex: m.codeIndex,
             teamLabel: team.label,
-            teammateCodeIndexes: team.members.filter((o) => o.codeIndex !== m.codeIndex).map((o) => o.codeIndex),
+            teammateCodeIndexes: [...new Set([...known, ...retired])],
           });
         }
       }
@@ -96,8 +137,10 @@ export function EvalReview() {
         deadband: resolveFactorParams(tm).deadband,
       };
 
-      const byRater = new Map<string, PeerEvalAnswers>();
+      const byRater = new Map<string, { scored: PeerEvalAnswers; submitted: PeerEvalAnswers }>();
       const rejected: RejectedBallot[] = [];
+      const adjusted: AdjustedBallot[] = [];
+      const neutralized: number[] = [];
       for (const s of students) {
         const sub = s[roundField];
         if (!sub) continue;
@@ -131,7 +174,31 @@ export function EvalReview() {
           rejected.push({ raterCodeIndex: s.codeIndex, teamLabel: expected.teamLabel, reasons });
           continue;
         }
-        byRater.set(s.hash, answers);
+        // Scored against the teammates who are still here. Points allocated to
+        // someone who has left are dropped and the rest scaled back up, so what
+        // the rater judged about the people still on the team is kept intact —
+        // rather than the ballot being thrown out and everyone imputed an even
+        // split, which is what used to happen.
+        const survivors = (currentByLabel.get(expected.teamLabel) ?? [])
+          .map((m) => m.codeIndex)
+          .filter((idx) => idx !== expected.raterCodeIndex);
+        const reconciled = reconcileBallot(answers, survivors);
+        if (reconciled.dropped.length > 0) {
+          adjusted.push({
+            raterCodeIndex: s.codeIndex,
+            teamLabel: expected.teamLabel,
+            dropped: reconciled.dropped,
+            neutralized: reconciled.noOpinion,
+          });
+        }
+        if (reconciled.noOpinion) {
+          // Nothing left to say about the survivors, so treat them as an even
+          // split — the same neutral treatment silence gets. They did submit,
+          // though, so record that separately.
+          neutralized.push(expected.raterCodeIndex);
+          continue;
+        }
+        byRater.set(s.hash, { scored: reconciled.answers, submitted: answers });
       }
 
       const nicknames = await openDirectoryNicknames(sid, directory.teams, (tokenHash) =>
@@ -139,7 +206,16 @@ export function EvalReview() {
       );
       setByRound((prev) => ({
         ...prev,
-        [round]: { directory, byRater, rejected, nicknames, computedFrom: submittedHashes.size },
+        [round]: {
+          directory,
+          byRater,
+          currentByLabel,
+          rejected,
+          adjusted,
+          neutralized,
+          nicknames,
+          computedFrom: submittedHashes.size,
+        },
       }));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -152,16 +228,25 @@ export function EvalReview() {
     if (!decrypted) return null;
     const params = resolveFactorParams(tm);
     return decrypted.directory.teams.map((team) => {
+      // Only members still on the roster: a removed student must not be rated,
+      // must not size the team, and must not be published to.
+      const members = decrypted.currentByLabel.get(team.label) ?? team.members;
       const submissions: PeerEvalAnswers[] = [];
-      for (const m of team.members) {
+      for (const m of members) {
         const ans = decrypted.byRater.get(m.codeHash);
-        if (ans) submissions.push(ans);
+        if (ans) submissions.push(ans.scored);
       }
+      const memberCodeIndexes = members.map((m) => m.codeIndex);
       const factors = computeTeamFactors(
-        { teamLabel: team.label, memberCodeIndexes: team.members.map((m) => m.codeIndex), submissions },
+        {
+          teamLabel: team.label,
+          memberCodeIndexes,
+          submissions,
+          submittedButNeutralized: decrypted.neutralized.filter((i) => memberCodeIndexes.includes(i)),
+        },
         params,
       );
-      return { team, factors };
+      return { team, members, factors };
     });
   }, [decrypted, tm.factorFloor, tm.factorCeiling, tm.deadband, tm.damping]);
 
@@ -195,11 +280,14 @@ export function EvalReview() {
     setInfo("");
     try {
       const patches: { hash: string; result: AesEnvelope }[] = [];
-      for (let ti = 0; ti < decrypted.directory.teams.length; ti++) {
-        const team = decrypted.directory.teams[ti];
+      // Walk the *current* members, not the directory's. Publishing writes with
+      // batch.update, and Firestore fails the whole batch when an update targets
+      // a document that no longer exists — so a single student removed since
+      // provisioning would block results for everyone in that chunk.
+      for (let ti = 0; ti < results.length; ti++) {
         const factors = results[ti].factors;
         const byIdx = new Map(factors.members.map((m) => [m.codeIndex, m]));
-        for (const member of team.members) {
+        for (const member of results[ti].members) {
           const m = byIdx.get(member.codeIndex);
           if (!m) continue;
           const rawB64 = decrypted.directory.memberKeys[member.codeHash];
@@ -213,7 +301,7 @@ export function EvalReview() {
           const withheld = m.raterCount < MIN_RATERS_TO_PUBLISH;
           const view: EvalResultView = {
             round: round,
-            teamLabel: team.label,
+            teamLabel: factors.teamLabel,
             raterCount: m.raterCount,
             neutralShare: m.neutralShare,
             share: detailed ? m.share : null,
@@ -245,8 +333,20 @@ export function EvalReview() {
         },
       };
       await saveTeamMgmt(sid, next, publicTeamMgmt(next));
+      // Members the directory still lists who are no longer on the roster. They
+      // were skipped deliberately — publishing writes with batch.update, which
+      // fails the whole batch against a document that no longer exists — but a
+      // silent skip would look like a successful publish to everyone.
+      const departed =
+        decrypted.directory.teams.reduce((n, t) => n + t.members.length, 0) -
+        results.reduce((n, r) => n + r.members.length, 0);
       setInfo(
         `Published ${patches.length} result summaries. Students can now see their own factor.` +
+          (departed > 0
+            ? ` ${departed} student${departed === 1 ? "" : "s"} in the provisioned teams ${
+                departed === 1 ? "is" : "are"
+              } no longer on the roster, so nothing was published to them — re-upload your codes CSV on the Teams tab to bring the teams back in step.`
+            : "") +
           (withheldCount > 0
             ? ` ${withheldCount} student${withheldCount === 1 ? " was" : "s were"} rated by fewer than ${MIN_RATERS_TO_PUBLISH} teammates, so ${withheldCount === 1 ? "their factor was" : "their factors were"} held at 1.00 — publishing it would have revealed a single teammate's ballot. Your table below still shows the computed value.`
             : ""),
@@ -277,6 +377,14 @@ export function EvalReview() {
           ))}
         </div>
       </div>
+
+      {stale.teamRosterStale && (
+        <p className="mb-3 rounded-md border border-amber-200 bg-amber-50 p-2 text-sm text-amber-900">
+          Your roster has changed since teams were provisioned. Students who were removed are already left out of
+          these factors, but their teammates are still being asked to rate them on the form — re-upload your
+          login-codes CSV on the Teams tab before opening another round.
+        </p>
+      )}
 
       <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2 text-sm">
         <p className="text-slate-600">
@@ -343,6 +451,30 @@ export function EvalReview() {
                     : `${decrypted.computedFrom - submitted} submission${decrypted.computedFrom - submitted === 1 ? " has" : "s have"} been withdrawn since you computed these.`}{" "}
                   Recompute to bring them up to date.
                 </p>
+              )}
+              {decrypted.adjusted.length > 0 && (
+                <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                  <p className="font-medium">
+                    {decrypted.adjusted.length} ballot{decrypted.adjusted.length === 1 ? " was" : "s were"}{" "}
+                    rescored around a teammate who has left the session.
+                  </p>
+                  <p className="mt-1">
+                    These were kept, not excluded. Points allocated to someone no longer on the team are dropped and
+                    the rest scaled back up to 100, so what the rater judged about the teammates who remain is
+                    unchanged. The detail CSV shows both what was submitted and what was scored.
+                  </p>
+                  <ul className="mt-2 list-disc space-y-0.5 pl-5">
+                    {decrypted.adjusted.map((a) => (
+                      <li key={`${a.teamLabel}:${a.raterCodeIndex}`}>
+                        <strong>#{a.raterCodeIndex}</strong> ({a.teamLabel}):{" "}
+                        {a.dropped.map((d) => `${d.points} pts to #${d.codeIndex}`).join(", ")}
+                        {a.neutralized
+                          ? " — nothing was left for the remaining teammates, so an even split was assumed."
+                          : " redistributed."}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
               )}
               {decrypted.rejected.length > 0 && (
                 <div className="mt-3 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-900">
