@@ -32,6 +32,7 @@ import type {
   AesEnvelope,
   Allocation,
   AllocationDoc,
+  Constraint,
   ContractState,
   EciesPayload,
   EvalRoundId,
@@ -41,6 +42,7 @@ import type {
   Project,
   PublicConfig,
   PublicTeamMgmt,
+  Question,
   SessionDoc,
   SessionSummary,
   StudentDoc,
@@ -276,6 +278,26 @@ export async function getPublicConfig(sid: string): Promise<PublicConfig | null>
 
 export async function updatePublicConfig(sid: string, patch: Partial<PublicConfig>): Promise<void> {
   await updateDoc(doc(db, "sessions", sid, "public", "config"), patch);
+}
+
+/**
+ * Writes the survey questions and the constraints that reference them in one
+ * batch, because they live in different documents: questions on the public
+ * config students read, constraints on the owner-only session doc.
+ *
+ * A constraint names its question by id, so applying one write without the
+ * other would leave the session pointing at questions that are not there.
+ * Same two-document batch as updateSessionStatus.
+ */
+export async function saveQuestionsAndConstraints(
+  sid: string,
+  questions: Question[],
+  constraints: Constraint[],
+): Promise<void> {
+  const batch = writeBatch(db);
+  batch.update(doc(db, "sessions", sid, "public", "config"), { questions });
+  batch.update(doc(db, "sessions", sid), { constraints, updatedAt: Date.now() });
+  await batch.commit();
 }
 
 // ---------- projects ----------

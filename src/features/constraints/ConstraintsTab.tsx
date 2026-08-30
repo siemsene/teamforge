@@ -97,7 +97,8 @@ export function ConstraintsTab() {
       <div className="flex items-center justify-between">
         <p className="text-sm text-slate-600">
           The optimizer minimizes weighted violations: team size limits are always enforced; everything else is
-          traded off by weight.
+          traded off by weight. To reuse another session's constraints, copy its survey from the Survey tab — the
+          questions and the constraints that reference them come across together.
         </p>
         <Button onClick={() => setAdding((v) => !v)}>{adding ? "Cancel" : "Add constraint"}</Button>
       </div>

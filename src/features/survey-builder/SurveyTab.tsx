@@ -5,6 +5,7 @@ import { randomId } from "../../lib/util";
 import type { Question, QuestionKind } from "../../types";
 import { QUESTION_TEMPLATES, TEMPLATE_CATEGORIES } from "./questionTemplates";
 import { dedupeOptions } from "./autoQuestions";
+import { CopySurveyCard } from "./CopySurveyCard";
 import {
   Badge,
   Button,
@@ -85,6 +86,8 @@ export function SurveyTab() {
         </Button>
       </div>
       <ErrorText>{actionError}</ErrorText>
+
+      {!showForm && !editing && <CopySurveyCard />}
 
       {showForm && (
         <QuestionForm

@@ -245,6 +245,18 @@ bullets([
   "Preferred teammates (Work style) — so friends can request each other.",
   "Plus the auto-generated “What is your Major?” question from the Data Dashboard requirement.",
 ]);
+h3("Reusing a survey from another session");
+p(
+  "If you have run TeamForge before, the Survey tab offers “Reuse another session's survey”. Pick one of your " +
+    "own sessions and TeamForge copies its questions together with the constraints that reference them — both at " +
+    "once, because a constraint names the question it works on. Everything is added to what this session already has; " +
+    "nothing is replaced.",
+);
+p(
+  "Before it writes anything you see exactly what will be added, and what will not. Two things never come across: " +
+    "questions marked “auto”, which are rebuilt from this session's own project requirements, and any " +
+    "constraint whose question therefore did not arrive. The reasons are listed so nothing goes missing quietly.",
+);
 note(
   "No free-text answers — by design",
   "Students can only pick options or numbers; there is no place to type a name. This is one reason the platform never " +
