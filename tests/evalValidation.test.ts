@@ -63,6 +63,19 @@ describe("validatePeerEval", () => {
     expect(validatePeerEval(answers({ points: { "2": 25, "3": 25, "4": 25, "5": 25 } }), teammates, CONFIG)).toEqual([]);
   });
 
+  it("accepts points for a teammate who has since moved to another team, when told about them", () => {
+    // EvalReview validates against the roster as the rater saw it: current
+    // members plus retired indexes plus the team's formerCodeIndexes. Without
+    // #5 in that list the ballot would be rejected for naming a non-teammate;
+    // with it, validation passes and reconciliation drops #5's share.
+    const ballot = answers({ points: { "2": 25, "3": 25, "4": 25, "5": 25 } });
+    expect(validatePeerEval(ballot, [2, 3, 4], CONFIG).join(" ")).toMatch(/not a teammate/);
+    expect(validatePeerEval(ballot, [2, 3, 4, 5], CONFIG)).toEqual([]);
+    const reconciled = reconcileBallot(ballot, [2, 3, 4]);
+    expect(reconciled.dropped).toEqual([{ codeIndex: 5, points: 25 }]);
+    expect(reconciled.answers.points).toEqual({ "2": 100 / 3, "3": 100 / 3, "4": 100 / 3 });
+  });
+
   it("rejects totals that are not 100", () => {
     const p = validatePeerEval(answers({ points: { "2": 25, "3": 25, "4": 25, "5": 30 } }), teammates, CONFIG);
     expect(p.join(" ")).toMatch(/sum to exactly 100/);

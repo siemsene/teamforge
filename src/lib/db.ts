@@ -22,6 +22,7 @@ import {
   writeBatch,
   runTransaction,
   arrayUnion,
+  deleteField,
   increment,
   type FirestoreError,
   type Unsubscribe,
@@ -532,6 +533,18 @@ export async function setNickname(
 ): Promise<void> {
   await updateDoc(doc(db, "sessions", sid, "teams", tokenHash), {
     [`nicknames.${codeIndex}`]: nickname,
+  });
+}
+
+/**
+ * Drops one student's display name from a team doc. Used when the instructor
+ * moves them: the name is sealed under the old team's key, which the new team
+ * cannot open, so it would otherwise sit there as a stale entry that the
+ * instructor's directory view still resolves.
+ */
+export async function clearNickname(sid: string, tokenHash: string, codeIndex: number): Promise<void> {
+  await updateDoc(doc(db, "sessions", sid, "teams", tokenHash), {
+    [`nicknames.${codeIndex}`]: deleteField(),
   });
 }
 

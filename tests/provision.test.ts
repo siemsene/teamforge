@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { buildProvisioning, type ResolvedTeam } from "../src/features/teams/provision";
-import { hashTeamToken } from "../src/lib/memberKey";
-import { eciesDecrypt, generateSessionKeys, unlockWithPassphrase } from "../src/lib/crypto";
-import type { TeamDirectory } from "../src/types";
+import { applyTeamEdit, teamsFromDirectory } from "../src/features/teams/teamEdit";
+import { deriveMemberKey, deriveMemberKeyRaw, hashTeamToken, openEnvelope } from "../src/lib/memberKey";
+import { eciesDecrypt, generateSessionKeys, toBase64, unlockWithPassphrase } from "../src/lib/crypto";
+import type { RosterInfo, TeamDirectory } from "../src/types";
 
 const SID = "sess123";
 
@@ -111,5 +112,90 @@ describe("buildProvisioning", () => {
     ];
     const second = await buildProvisioning(SID, publicKeyJwk, teamsV2, undefined, first);
     expect(second.studentPatches.map((p) => p.hash).sort()).toEqual(["hash1", "hash2", "hash3", "hash4"]);
+  });
+
+  it("seals with a supplied raw key exactly as it would from the code", async () => {
+    // This is what lets the Teams tab change a team without the codes CSV: the
+    // directory holds each member's raw key, and a blob sealed from it must
+    // open with the key the student derives from their own code at login.
+    const { publicKeyJwk, privateKey } = await keys();
+    const code = "CODE0-00003";
+    const raw = await deriveMemberKeyRaw(SID, code);
+    const teams: ResolvedTeam[] = [{ label: "Team 1", members: [{ codeIndex: 3, codeHash: "hash3", memberKeyRaw: raw }] }];
+    const built = await buildProvisioning(SID, publicKeyJwk, teams);
+
+    const opened = JSON.parse(await openEnvelope(await deriveMemberKey(SID, code), built.studentPatches[0].roster)) as RosterInfo;
+    expect(opened.codeIndex).toBe(3);
+    expect(opened.teamLabel).toBe("Team 1");
+    expect(opened.teammates).toEqual([]);
+    const dir = await readDirectory(privateKey, built.directoryPayload);
+    expect(dir.memberKeys.hash3).toBe(toBase64(raw));
+    expect(built.directory).toEqual(dir);
+  });
+
+  it("round-trips: directory -> teamsFromDirectory -> rebuild keeps tokens and keys", async () => {
+    const { publicKeyJwk, privateKey } = await keys();
+    const first = await readDirectory(privateKey, (await buildProvisioning(SID, publicKeyJwk, teamsV1)).directoryPayload);
+    const live = [1, 2, 3, 4].map((codeIndex) => ({ codeIndex, hash: `hash${codeIndex}` }));
+    const { teams, missingKey } = teamsFromDirectory(first, live);
+    expect(missingKey).toEqual([]);
+
+    const second = await buildProvisioning(SID, publicKeyJwk, teams, undefined, first);
+    expect(second.directory.teams.map((t) => [t.label, t.token])).toEqual(first.teams.map((t) => [t.label, t.token]));
+    expect(second.directory.memberKeys).toEqual(first.memberKeys);
+    expect(second.teamDocs.every((d) => d.reused)).toBe(true);
+  });
+
+  it("records who moved off a team, and forgets them when they come back", async () => {
+    // A ballot a teammate submitted while #3 was on Team 2 allocates points to
+    // #3. Validation must still accept it, and #3 is neither a current member
+    // nor a retired index — so the directory remembers.
+    const { publicKeyJwk } = await keys();
+    const first = (await buildProvisioning(SID, publicKeyJwk, teamsV1)).directory;
+    const live = [1, 2, 3, 4].map((codeIndex) => ({ codeIndex, hash: `hash${codeIndex}` }));
+
+    const moved = applyTeamEdit(teamsFromDirectory(first, live).teams, { type: "move", codeHash: "hash3", toLabel: "Team 1" });
+    const second = (await buildProvisioning(SID, publicKeyJwk, moved, undefined, first)).directory;
+    expect(second.teams.find((t) => t.label === "Team 2")!.formerCodeIndexes).toEqual([3]);
+    expect(second.teams.find((t) => t.label === "Team 1")!.formerCodeIndexes).toBeUndefined();
+
+    // A later rebuild with no change keeps the record.
+    const third = (await buildProvisioning(SID, publicKeyJwk, teamsFromDirectory(second, live).teams, undefined, second)).directory;
+    expect(third.teams.find((t) => t.label === "Team 2")!.formerCodeIndexes).toEqual([3]);
+
+    // Moving back makes them a member again, not a former one.
+    const back = applyTeamEdit(teamsFromDirectory(third, live).teams, { type: "move", codeHash: "hash3", toLabel: "Team 2" });
+    const fourth = (await buildProvisioning(SID, publicKeyJwk, back, undefined, third)).directory;
+    expect(fourth.teams.find((t) => t.label === "Team 2")!.formerCodeIndexes).toBeUndefined();
+    // ...and Team 1 now remembers them instead.
+    expect(fourth.teams.find((t) => t.label === "Team 1")!.formerCodeIndexes).toEqual([3]);
+  });
+
+  it("does not count a student who left the session as a former member", async () => {
+    const { publicKeyJwk } = await keys();
+    const first = (await buildProvisioning(SID, publicKeyJwk, teamsV1)).directory;
+    const live = [1, 2, 4].map((codeIndex) => ({ codeIndex, hash: `hash${codeIndex}` })); // #3 removed
+    const second = (await buildProvisioning(SID, publicKeyJwk, teamsFromDirectory(first, live).teams, undefined, first)).directory;
+    expect(second.teams.find((t) => t.label === "Team 2")!.formerCodeIndexes).toBeUndefined();
+  });
+
+  it("keeps an emptied team's token rather than reporting it stale", async () => {
+    const { publicKeyJwk } = await keys();
+    const first = (await buildProvisioning(SID, publicKeyJwk, teamsV1)).directory;
+    const emptied: ResolvedTeam[] = [
+      { label: "Team 1", members: [member(1), member(2), member(3), member(4)] },
+      { label: "Team 2", members: [] },
+    ];
+    const second = await buildProvisioning(SID, publicKeyJwk, emptied, undefined, first);
+    expect(second.staleTokenHashes).toEqual([]);
+    expect(second.teamDocs.map((d) => d.reused)).toEqual([true, true]);
+    expect(second.directory.teams.find((t) => t.label === "Team 2")!.token).toBe(first.teams[1].token);
+  });
+
+  it("refuses a member with neither a code nor a key", async () => {
+    const { publicKeyJwk } = await keys();
+    await expect(
+      buildProvisioning(SID, publicKeyJwk, [{ label: "Team 1", members: [{ codeIndex: 9, codeHash: "hash9" }] }]),
+    ).rejects.toThrow(/#9/);
   });
 });

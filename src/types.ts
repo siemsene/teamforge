@@ -368,6 +368,12 @@ export interface TeamDirectory {
     token: string;
     label: string;
     members: { codeIndex: number; codeHash: string }[];
+    /** Indexes that were on this team and were since moved to another one.
+     * Ballots their former teammates submitted while they were here allocate
+     * points to them, and validation must still accept those — a moved student
+     * is neither a current member nor a retired index. Absent on directories
+     * written before students could be moved by hand. */
+    formerCodeIndexes?: number[];
   }[];
   /** codeHash -> base64 raw member key, so publishing results never needs the codes CSV again. */
   memberKeys: Record<string, string>;

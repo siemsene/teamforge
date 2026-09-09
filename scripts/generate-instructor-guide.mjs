@@ -344,10 +344,10 @@ bullets([
 note(
   "What to redo after a roster change",
   "Anything already worked out from the roster is now out of date, and TeamForge says so rather than quietly using it. " +
-    "If you had saved an allocation, re-run the optimizer and save. If you had provisioned teams, re-upload your " +
-    "login-codes CSV on the Teams tab — that is what removes a departed student from their teammates' contract and " +
-    "peer-evaluation form. Upload the master file with the new rows appended, never the small file of new codes on " +
-    "its own: a file that covers only part of the class deletes every team it does not mention.",
+    "If you had saved an allocation, re-run the optimizer and save. If you had provisioned teams, the Teams tab shows a " +
+    "banner with an Update teams now button: unlock and press it, and a departed student is taken off their teammates' " +
+    "contract and peer-evaluation form, with no file to upload. A student you added here is on no team until you place " +
+    "them on the Teams tab (see section 11) — or add them from the Teams tab in the first place, which does both at once.",
 );
 
 // ----------------------------------------------------------------------------
@@ -413,6 +413,21 @@ bullets([
   "Once teams are provisioned, the Teams tab offers a ready-made email announcing the team and the contract, and the Peer evals tab offers one per round. Each is editable, saved with the session, and uses the same <STUDENT NAME> / <LOGIN CODE> / <DEADLINE> placeholders as the survey email, so one mail merge covers the whole term. The graded-round draft quotes this session's own factor caps and links the worked-example workbook, so what students are told matches what the app computes.",
 ]);
 
+h3("Changing teams after they are provisioned");
+p(
+  "Students add and drop for weeks after teams are set. Once teams are provisioned, you change them one student at a " +
+    "time on the Teams tab, after unlocking with your passphrase. None of this needs the codes CSV: the encrypted team " +
+    "directory already holds what is needed to re-seal each provisioned student's team.",
+);
+bullets([
+  "Add a student: press Add a student (or Add a student to this team inside a team). For someone new to the class, a login code is minted, downloaded as a one-row CSV exactly as on the Roster tab, and they are placed on the team in the same step. Keep those rows with your master codes file. For someone who already has a code but is on no team — added on the Roster tab after provisioning — type their code; it is used once, in your browser, to derive their key.",
+  "Move a student: open their team, press Move next to their name and pick the destination, or type a name to create a new team (a name that matches an existing team joins it). Both teams' members see the change on their next login. Display names are sealed per team, so the moved student picks theirs again; their old team's contract stays as it was, without them.",
+  "Remove a student who dropped: press Remove from session next to their name. This is the same removal as on the Roster tab — their record and response are deleted, their code stops working, their number is retired — and their teammates stop seeing them straight away.",
+  "Delete a team that has emptied: a team with nobody left on it is kept, contract and all, until you press Delete team inside it.",
+  "Mid-round moves: if a peer-evaluation round is open when you move somebody, the ballot they already submitted was about their old teammates, so it is withdrawn and they are asked to fill one in for the new team. Ballots their old teammates submitted that named them are still accepted; the points allocated to them are dropped and the rest scaled back up, as for a student who left. Teammates on either team who had already submitted did not rate them. Where you can, move students between rounds rather than during one.",
+  "The whole-roster re-upload remains for wholesale changes. It now starts from the teams as they stand, so students you moved by hand are not moved back, and a team column in the file still wins.",
+]);
+
 h3("Display names (students choose their own)");
 bullets([
   "On first login a student is asked to choose a display name. It is encrypted under their team's key, so only their teammates and you can read it — the platform stores it unreadable.",
@@ -452,9 +467,10 @@ const faq = [
   ["“Awaiting approval” after registering.", "Your email is verified but an administrator hasn't approved you yet. You can't create sessions until then."],
   ["I forgot my passphrase.", "Unlock with the recovery key file instead (Allocation tab). Then consider re-creating the session with a passphrase you'll remember."],
   ["I lost both the passphrase and recovery key.", "The student answers are permanently unreadable — by design. Re-open the survey with new codes if you must collect again."],
-  ["A student joined the class in week 2.", "Roster tab, Add. You get their login code in a small CSV — append those rows to your master codes file. If you had already saved an allocation or provisioned teams, redo those: the app flags both as out of date, and re-running the optimizer is what actually gives the newcomer a team."],
-  ["A student dropped the class.", "Roster tab: select their tile and Remove. Their record and response are deleted and their code stops working. If teams were already provisioned, re-upload your codes CSV on the Teams tab — until you do, their teammates still see them on the contract and the peer-evaluation form. Their number is retired and will not be handed to anyone else."],
-  ["I removed a student mid-way through a peer-evaluation round. Did I ruin it?", "No. Ballots already submitted are kept: the points allocated to the departed student are dropped and the rest scaled back up to 100, so what each rater said about the teammates who remain is preserved exactly. The review screen lists which ballots were adjusted, and the detail CSV shows both what was submitted and what was scored."],
+  ["A student joined the class in week 2.", "Before teams exist: Roster tab, Add. You get their login code in a small CSV — append those rows to your master codes file — and re-running the optimizer is what gives them a team. After teams are provisioned: Teams tab, Add a student, pick their team. Their code is minted and downloaded and they are placed in one step, with nothing to re-upload."],
+  ["A student dropped the class.", "Roster tab: select their tile and Remove — or, once teams are provisioned, open their team on the Teams tab and press Remove from session, which takes them off the team at the same time. Either way their record and response are deleted and their code stops working. If you removed them on the Roster tab, the Teams tab shows a banner: press Update teams now so their teammates stop seeing them on the contract and the peer-evaluation form. Their number is retired and will not be handed to anyone else."],
+  ["A student needs to switch teams.", "Teams tab: open their current team, press Move next to their name and choose the destination — or type a name to start a new team. Their contract access and peer-evaluation form follow them on their next login; they choose their display name again on the new team. If a round is open, the ballot they already submitted is withdrawn so they can fill one in for the new team."],
+  ["I removed a student mid-way through a peer-evaluation round. Did I ruin it?", "No. Ballots already submitted are kept: the points allocated to the departed student are dropped and the rest scaled back up to 100, so what each rater said about the teammates who remain is preserved exactly. The same happens when you move a student to another team mid-round. The review screen lists which ballots were adjusted, and the detail CSV shows both what was submitted and what was scored."],
   ["Can a student I removed still get at their old team's contract?", "Possibly, and it is worth knowing. Their login stops working at once, but a team's documents are reached by holding an unguessable token, and if they had already logged in they may still hold it. To cut that off, re-upload the roster giving that team a different label — that mints a new key. It also starts that team's contract and display names over, so it is a deliberate trade rather than something to do routinely."],
   ["A student says their code isn't recognized.", "Check for typos; codes are case-insensitive and tolerant of dashes/spaces. Make sure they're using their login code, not a share code, and that the survey is Open."],
   ["The same category appears twice (e.g. “Woman” and “Female”).", "Use the standard-scale dropdown for both the survey option and the project requirement value so they match exactly; remove the stray option from the survey question."],

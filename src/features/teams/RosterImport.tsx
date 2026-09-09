@@ -1,23 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSession } from "../sessions/SessionContext";
-import {
-  getAllocationDoc,
-  getTeamDirectoryDoc,
-  provisionRoster,
-  saveTeamDirectory,
-  saveTeamMgmt,
-} from "../../lib/db";
+import { getAllocationDoc, getTeamDirectoryDoc } from "../../lib/db";
 import { eciesDecrypt } from "../../lib/crypto";
-import { defaultTeamMgmtConfig, publicTeamMgmt } from "./contractTemplate";
 import { groupByTeam, parseRosterCsv } from "./rosterCsv";
 import {
   hashRows,
   joinAllocationTeams,
   membershipFromAllocation,
+  membershipFromDirectory,
+  mergeMembership,
   teamLabels,
   type Membership,
 } from "./allocationTeams";
-import { buildProvisioning, resolveRoster, type ResolvedTeam } from "./provision";
+import { resolveRoster, type ResolvedTeam } from "./provision";
+import { reprovisionTeams } from "./reprovision";
 import { Button, Card, ConfirmDialog, ErrorText, Spinner } from "../../components/ui";
 import { UnlockPanel } from "../sessions/UnlockPanel";
 import type { Allocation, TeamDirectory, TeamMgmtConfig } from "../../types";
@@ -35,12 +31,13 @@ type Stage =
   | { name: "provisioning"; done: number; total: number }
   | { name: "done" };
 
-/** Whether the saved allocation is available to supply team assignments. */
+/** Whether saved teams (the allocation, or the teams as provisioned) are
+ * available to supply team assignments. */
 type AllocationState =
   | { name: "loading" }
   | { name: "none" }
   | { name: "locked" }
-  | { name: "ready"; membership: Membership; count: number };
+  | { name: "ready"; membership: Membership; count: number; previous: TeamDirectory | null };
 
 /**
  * Upload path: the login-codes CSV, exactly as downloaded.
@@ -48,8 +45,10 @@ type AllocationState =
  * The file is needed for one reason only — login codes are shown once and never
  * stored, and a member key must be derived from each student's own code. Team
  * assignments are *not* re-entered: they come from the allocation already saved
- * for this session, joined by code hash. A `team` column in the file still wins
- * where present.
+ * for this session, joined by code hash — and, once teams have been provisioned,
+ * from the teams as they actually are, so students the instructor moved by hand
+ * on the Teams tab are not quietly moved back. A `team` column in the file still
+ * wins where present.
  *
  * Everything below runs in the instructor's browser. Only team membership is
  * uploaded. A `name` column is tolerated and shown in the preview so the
@@ -85,14 +84,24 @@ export function RosterImport({
     let cancelled = false;
     (async () => {
       try {
-        const doc = await getAllocationDoc(sid);
+        const [allocDoc, dirDoc] = await Promise.all([getAllocationDoc(sid), getTeamDirectoryDoc(sid)]);
         if (cancelled) return;
-        if (!doc) return setAllocation({ name: "none" });
+        if (!allocDoc && !dirDoc) return setAllocation({ name: "none" });
         if (!sessionKey) return setAllocation({ name: "locked" });
-        const alloc = JSON.parse(await eciesDecrypt(sessionKey, doc.payload)) as Allocation;
+        let membership: Membership = { byHash: new Map(), problems: [] };
+        if (allocDoc) {
+          const alloc = JSON.parse(await eciesDecrypt(sessionKey, allocDoc.payload)) as Allocation;
+          membership = membershipFromAllocation(alloc, labels);
+        }
+        // The directory wins: it is where students are now, which may differ
+        // from where the optimizer put them.
+        let previous: TeamDirectory | null = null;
+        if (dirDoc) {
+          previous = JSON.parse(await eciesDecrypt(sessionKey, dirDoc.payload)) as TeamDirectory;
+          membership = mergeMembership(membership, membershipFromDirectory(previous));
+        }
         if (cancelled) return;
-        const membership = membershipFromAllocation(alloc, labels);
-        setAllocation({ name: "ready", membership, count: membership.byHash.size });
+        setAllocation({ name: "ready", membership, count: membership.byHash.size, previous });
       } catch (e) {
         if (!cancelled) {
           setAllocation({ name: "none" });
@@ -159,26 +168,16 @@ export function RosterImport({
       // exist keep their token — and therefore their doc, their contract and
       // everyone's chosen display names. Without it, provisioning again would
       // quietly throw all of that away.
-      let previous: TeamDirectory | null = null;
-      if (sessionKey) {
-        const dirDoc = await getTeamDirectoryDoc(sid);
-        if (dirDoc) previous = JSON.parse(await eciesDecrypt(sessionKey, dirDoc.payload)) as TeamDirectory;
-      } else if (reprovisioning) {
+      const previous = allocation.name === "ready" ? allocation.previous : null;
+      if (reprovisioning && !previous) {
         throw new Error(
           "Unlock this session first — without the passphrase the existing teams cannot be matched up, and their contracts and display names would be lost.",
         );
       }
-      const built = await buildProvisioning(
-        sid,
-        session.wrappedKeys.publicKeyJwk,
-        teams,
-        (done, total) => setStage({ name: "provisioning", done, total }),
-        previous,
-      );
-      await provisionRoster(sid, built.studentPatches, built.teamDocs, built.staleTokenHashes);
-      await saveTeamDirectory(sid, built.directoryPayload);
-      const config: TeamMgmtConfig = { ...(existingConfig ?? defaultTeamMgmtConfig()), rosterUploadedAt: Date.now() };
-      await saveTeamMgmt(sid, config, publicTeamMgmt(config));
+      await reprovisionTeams(sid, { wrappedKeys: session.wrappedKeys, teamMgmt: existingConfig }, previous, teams, {
+        onProgress: (done, total) => setStage({ name: "provisioning", done, total }),
+        students,
+      });
       setStage({ name: "done" });
       onDone?.();
     } catch (e) {
@@ -218,8 +217,8 @@ export function RosterImport({
           {stage.teams.length} teams, {teamedCount} of {students.length} students matched.{" "}
           {stage.fromAllocation > 0 && (
             <>
-              {stage.fromAllocation} team assignment{stage.fromAllocation === 1 ? "" : "s"} came from your saved
-              allocation
+              {stage.fromAllocation} team assignment{stage.fromAllocation === 1 ? "" : "s"} came from the teams you
+              already have{reprovisioning ? " (as provisioned, including any students you moved by hand)" : " (your saved allocation)"}
               {stage.fromFile > 0 && <>, {stage.fromFile} from a team column in your file</>}.{" "}
             </>
           )}
@@ -357,10 +356,10 @@ export function RosterImport({
       {allocation.name === "ready" && (
         <p className="mb-3 text-sm text-slate-600">
           Upload the <code className="rounded bg-slate-100 px-1 text-xs">student-codes.csv</code> you downloaded when
-          you created this session — <strong>exactly as it is</strong>, no extra columns. Teams come from the
-          allocation you already saved ({allocation.count} students). The file is needed only because login codes are
-          never stored: each student&rsquo;s team is sealed under a key derived from their own code, so that code has
-          to come from you. It stays in your browser.
+          you created this session — <strong>exactly as it is</strong>, no extra columns. Teams come from{" "}
+          {reprovisioning ? "the teams as they stand now" : "the allocation you already saved"} ({allocation.count}{" "}
+          students). The file is needed only because login codes are never stored: each student&rsquo;s team is
+          sealed under a key derived from their own code, so that code has to come from you. It stays in your browser.
         </p>
       )}
 

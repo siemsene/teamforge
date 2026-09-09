@@ -10,10 +10,10 @@
 import { eciesEncrypt, toBase64 } from "../../lib/crypto";
 import { hashCode } from "../../lib/codes";
 import {
-  deriveMemberKey,
   deriveMemberKeyRaw,
   generateTeamToken,
   hashTeamToken,
+  importMemberKey,
   sealEnvelope,
 } from "../../lib/memberKey";
 import type {
@@ -26,11 +26,22 @@ import type {
 } from "../../types";
 import type { RosterRow } from "./rosterCsv";
 
+/**
+ * A student to place on a team. The member key comes from one of two places:
+ *
+ *   - `code`: the login code, from the instructor's CSV. The key is derived
+ *     from it with PBKDF2 (slow, deliberately).
+ *   - `memberKeyRaw`: the key itself, read back out of the previous encrypted
+ *     team directory. This is what lets an instructor move or remove a student
+ *     who is already provisioned without handing the codes CSV over again.
+ *
+ * One of the two is required; `memberKeyRaw` wins when both are present.
+ */
 export interface ResolvedMember {
   codeIndex: number;
   codeHash: string;
-  /** The login code, needed to derive the member key. */
-  code: string;
+  code?: string;
+  memberKeyRaw?: Uint8Array;
 }
 
 export interface ResolvedTeam {
@@ -57,11 +68,21 @@ export interface ProvisionResult {
   /** Token hashes of teams in the previous directory that no longer exist. */
   staleTokenHashes: string[];
   directoryPayload: EciesPayload;
+  /** The directory in the clear, so a caller that already holds the previous
+   * one can carry on without decrypting what it just wrote. */
+  directory: TeamDirectory;
+}
+
+async function memberKeyRawFor(sid: string, member: ResolvedMember): Promise<Uint8Array> {
+  if (member.memberKeyRaw) return member.memberKeyRaw;
+  if (member.code) return deriveMemberKeyRaw(sid, member.code);
+  throw new Error(`No login code or member key for student #${member.codeIndex}.`);
 }
 
 /**
  * Derives keys and seals every artifact. `onProgress` is called as each member
- * key is derived (the slow part — one PBKDF2 per student).
+ * is sealed (the slow part is one PBKDF2 per student whose key is not already
+ * known).
  *
  * `previous` is the directory from an earlier provisioning run, when there is
  * one. A team's doc id is the hash of its token, and the contract and everyone's
@@ -69,6 +90,11 @@ export interface ProvisionResult {
  * that already exists silently orphans all of it. Any team whose label we have
  * seen before therefore keeps its token, and only genuinely new teams get a new
  * one. Labels that have disappeared are reported back for deletion.
+ *
+ * A team handed in with no members is still written (label only, token kept):
+ * emptying a team by moving its last student out must not delete the contract
+ * they wrote. Dropping a team is the caller's explicit decision, made by
+ * leaving it out of `teams`.
  */
 export async function buildProvisioning(
   sid: string,
@@ -80,26 +106,40 @@ export async function buildProvisioning(
   const totalMembers = teams.reduce((n, t) => n + t.members.length, 0);
   let done = 0;
 
-  const tokenByLabel = new Map((previous?.teams ?? []).map((t) => [t.label, t.token]));
+  const previousByLabel = new Map((previous?.teams ?? []).map((t) => [t.label, t]));
   const keptLabels = new Set(teams.map((t) => t.label));
+  const placedIndexes = new Set(teams.flatMap((t) => t.members.map((m) => m.codeIndex)));
 
   const studentPatches: { hash: string; roster: AesEnvelope }[] = [];
   const teamDocs: { tokenHash: string; team: TeamDoc; reused: boolean }[] = [];
   const directory: TeamDirectory = { createdAt: Date.now(), teams: [], memberKeys: {} };
 
   for (const team of teams) {
-    const existingToken = tokenByLabel.get(team.label);
-    const token = existingToken ?? generateTeamToken();
+    const old = previousByLabel.get(team.label);
+    const token = old?.token ?? generateTeamToken();
     const tokenHash = await hashTeamToken(token);
     teamDocs.push({
       tokenHash,
       team: { teamLabel: team.label, createdAt: Date.now(), contract: emptyContract(), nicknames: {} },
-      reused: existingToken != null,
+      reused: old != null,
     });
+
+    // Who used to be on this team and is now on another one. Anyone who has
+    // left the session entirely is covered by session.retiredCodeIndexes, and
+    // anyone who came back to this team is a member again, so neither belongs
+    // here.
+    const current = new Set(team.members.map((m) => m.codeIndex));
+    const former = new Set<number>();
+    for (const idx of old?.formerCodeIndexes ?? []) if (!current.has(idx)) former.add(idx);
+    for (const m of old?.members ?? []) {
+      if (!current.has(m.codeIndex) && placedIndexes.has(m.codeIndex)) former.add(m.codeIndex);
+    }
+
     directory.teams.push({
       token,
       label: team.label,
       members: team.members.map((m) => ({ codeIndex: m.codeIndex, codeHash: m.codeHash })),
+      ...(former.size > 0 ? { formerCodeIndexes: [...former].sort((a, b) => a - b) } : {}),
     });
 
     for (const member of team.members) {
@@ -111,10 +151,11 @@ export async function buildProvisioning(
           .filter((o) => o.codeIndex !== member.codeIndex)
           .map((o) => ({ codeIndex: o.codeIndex })),
       };
-      const memberKey = await deriveMemberKey(sid, member.code);
+      const raw = await memberKeyRawFor(sid, member);
+      const memberKey = await importMemberKey(raw);
       const sealed = await sealEnvelope(memberKey, JSON.stringify(roster));
       studentPatches.push({ hash: member.codeHash, roster: sealed });
-      directory.memberKeys[member.codeHash] = toBase64(await deriveMemberKeyRaw(sid, member.code));
+      directory.memberKeys[member.codeHash] = toBase64(raw);
       done += 1;
       onProgress?.(done, totalMembers);
     }
@@ -128,7 +169,7 @@ export async function buildProvisioning(
   }
 
   const directoryPayload = await eciesEncrypt(sessionPublicKeyJwk, JSON.stringify(directory));
-  return { studentPatches, teamDocs, staleTokenHashes, directoryPayload };
+  return { studentPatches, teamDocs, staleTokenHashes, directoryPayload, directory };
 }
 
 /** How to refer to a roster row in an error message. Prefers the preview-only

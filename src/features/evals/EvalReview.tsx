@@ -113,12 +113,13 @@ export function EvalReview() {
       // Who each rater's ballot is allowed to talk about, from the roster we
       // hold — never from anything the ballot asserts about itself.
       //
-      // Validation uses the roster as provisioned, plus any index retired since,
-      // because that is what the student had in front of them. Judging a ballot
-      // against a roster that changed after they submitted it would reject an
-      // honest answer for our bookkeeping. Reconciliation to the survivors
-      // happens after, never before — renormalizing first would make the
-      // justification rule fire on numbers the student never typed.
+      // Validation uses the roster as provisioned, plus any index retired since
+      // and anyone moved off this team since, because that is what the student
+      // had in front of them. Judging a ballot against a roster that changed
+      // after they submitted it would reject an honest answer for our
+      // bookkeeping. Reconciliation to the survivors happens after, never
+      // before — renormalizing first would make the justification rule fire on
+      // numbers the student never typed.
       const retired = new Set(session.retiredCodeIndexes ?? []);
       const expectedByHash = new Map<string, { raterCodeIndex: number; teammateCodeIndexes: number[]; teamLabel: string }>();
       for (const team of directory.teams) {
@@ -127,7 +128,7 @@ export function EvalReview() {
           expectedByHash.set(m.codeHash, {
             raterCodeIndex: m.codeIndex,
             teamLabel: team.label,
-            teammateCodeIndexes: [...new Set([...known, ...retired])],
+            teammateCodeIndexes: [...new Set([...known, ...retired, ...(team.formerCodeIndexes ?? [])])],
           });
         }
       }

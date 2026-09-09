@@ -148,6 +148,7 @@ bullets([
   "An equal split is the default and a perfectly legitimate answer — if everyone pulled their weight, say so and you're done. Small differences are treated as noise: the form shows you the range that changes nobody's grade, and anything inside it needs no explanation. Going outside that range does change someone's grade, so it asks you for one sentence saying why.",
   "You can check the arithmetic yourself. The peer-evaluation page links a spreadsheet that works through a five-person team step by step — it is a live calculator, so you can change the numbers and see what would happen. Nothing about how your factor is worked out is hidden from you.",
   "Two things worth knowing. The highest and the lowest rating you receive are both thrown away before your factor is worked out, so no single teammate — generous or harsh — decides your result. And if a teammate never submits, they're counted as having split evenly, so nobody gains or loses from someone else's silence.",
+  "If your instructor moves you to another team, your same login code takes you to the new team on your next login. Display names are kept per team, so you'll be asked to choose yours again; and if a peer-evaluation round was open, the evaluation you had submitted about your old teammates is withdrawn and you'll be asked to fill one in for the new team.",
 ]);
 note(
   "Your privacy still holds here",

@@ -12,7 +12,7 @@
 // without Firestore.
 
 import { hashCode } from "../../lib/codes";
-import type { Allocation, Project, SessionDoc } from "../../types";
+import type { Allocation, Project, SessionDoc, TeamDirectory } from "../../types";
 import type { RosterRow } from "./rosterCsv";
 
 /**
@@ -60,6 +60,28 @@ export function membershipFromAllocation(
     for (const hash of hashes) byHash.set(hash, label ?? teamId);
   }
   return { byHash, problems };
+}
+
+/**
+ * Flattens a previously provisioned directory into codeHash -> team label.
+ *
+ * Once teams exist, the directory — not the allocation — is where students
+ * actually are: the instructor may have moved people by hand on the Teams tab
+ * since. A re-upload that seeded from the allocation alone would quietly undo
+ * every one of those moves.
+ */
+export function membershipFromDirectory(directory: Pick<TeamDirectory, "teams">): Membership {
+  const byHash = new Map<string, string>();
+  for (const team of directory.teams) for (const m of team.members) byHash.set(m.codeHash, team.label);
+  return { byHash, problems: [] };
+}
+
+/** `over` wins where both place the same student; problems are concatenated. */
+export function mergeMembership(base: Membership, over: Membership): Membership {
+  return {
+    byHash: new Map([...base.byHash, ...over.byHash]),
+    problems: [...base.problems, ...over.problems],
+  };
 }
 
 export interface HashedRow {

@@ -88,18 +88,32 @@ export function StudentHub({
   }, [sid, roster, teamKey]);
 
   async function refresh() {
-    const [fresh, info] = [await getStudentByHash(sid, hash), roster];
+    const fresh = await getStudentByHash(sid, hash);
     // A student can be removed from the session while their tab is open. Their
     // document is gone, so every write from here on would fail; keeping the
     // stale copy on screen would let them carry on working into a void.
     if (!fresh) return setRemoved(true);
     setCurrent(fresh);
+    let info = roster;
+    let tKey = teamKey;
+    // The instructor can also move this student to another team while the tab
+    // is open. The roster blob is re-sealed when that happens, so a changed
+    // ciphertext means a changed team: re-open it rather than keep writing to
+    // the old team's documents with the old team's key.
+    if (memberKey && fresh.roster && fresh.roster.iv !== current.roster?.iv) {
+      info = JSON.parse(await openEnvelope(memberKey, fresh.roster)) as RosterInfo;
+      tKey = await deriveTeamKey(sid, info.teamToken);
+      setRoster(info);
+      setTeamKey(tKey);
+      setTeam(null);
+      setNicknames({});
+    }
     if (info && memberKey) {
       const tokenHash = await hashTeamToken(info.teamToken);
       const teamDoc = await getTeamByTokenHash(sid, tokenHash);
       if (teamDoc) {
         setTeam({ ...teamDoc, tokenHash });
-        if (teamKey) setNicknames(await openNicknames(teamKey, teamDoc.nicknames));
+        if (tKey) setNicknames(await openNicknames(tKey, teamDoc.nicknames));
       }
     }
   }

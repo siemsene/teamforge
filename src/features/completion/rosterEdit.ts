@@ -132,3 +132,24 @@ export function removalConsequences(
   ];
   return ORDER.filter((c) => out.has(c));
 }
+
+/**
+ * What each consequence means, in the instructor's terms. Kept as data so a
+ * dialog can say what is true for this particular selection rather than warning
+ * in general terms about everything that might be affected. Shared by the
+ * Roster tab and the Teams tab, which remove the same way.
+ */
+export const CONSEQUENCE_TEXT: Record<RemovalConsequence, string> = {
+  hasResponse:
+    "Their encrypted survey response is deleted with them. If you have already run the optimizer, run it again — it was solved with their answers in it.",
+  inSavedAllocation:
+    "This session has a saved allocation. Open the Allocation tab, re-run the optimizer (or move the rest by hand) and save, or a team keeps a seat for somebody who is gone.",
+  provisionedTeam:
+    "They are on a provisioned team. Use Update teams now on the Teams tab so their teammates stop seeing them on the contract and on the peer-evaluation form.",
+  submittedBallot:
+    "The peer evaluation they submitted goes with them. Their teammates' ballots do not: the points allocated to this student are dropped and the rest scaled back up, so what those ballots judged about everyone else is kept.",
+  resultsPublished:
+    "Results were already published to them. They will not be able to open them again.",
+  teamKeyRetained:
+    "Removing them does not take back the team key they already hold. Someone who kept it can still read and edit that team's contract while team management is on. To cut that off, re-upload the roster giving that team a different label — that mints a new key, and starts that team's contract and display names afresh.",
+};

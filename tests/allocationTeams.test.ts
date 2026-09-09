@@ -3,6 +3,8 @@ import {
   hashRows,
   joinAllocationTeams,
   membershipFromAllocation,
+  membershipFromDirectory,
+  mergeMembership,
   teamLabels,
   type HashedRow,
   type Membership,
@@ -169,5 +171,41 @@ describe("joinAllocationTeams", () => {
 
     const unidentifiable = joinAllocationTeams([{ row: row(), codeHash: null }], membership);
     expect(unidentifiable.problems[0]).toMatch(/A row in the file/);
+  });
+});
+
+describe("membershipFromDirectory / mergeMembership", () => {
+  it("lets the provisioned teams override the saved allocation", () => {
+    // The instructor moved h2 from Team 1 to Team 2 by hand on the Teams tab.
+    // A re-upload seeded from the allocation alone would move them back.
+    const allocation: Membership = {
+      byHash: new Map([
+        ["h1", "Team 1"],
+        ["h2", "Team 1"],
+        ["h3", "Team 2"],
+      ]),
+      problems: ["from allocation"],
+    };
+    const directory = membershipFromDirectory({
+      teams: [
+        { token: "a", label: "Team 1", members: [{ codeIndex: 1, codeHash: "h1" }] },
+        { token: "b", label: "Team 2", members: [{ codeIndex: 2, codeHash: "h2" }, { codeIndex: 3, codeHash: "h3" }] },
+      ],
+    });
+    expect(directory.problems).toEqual([]);
+
+    const merged = mergeMembership(allocation, directory);
+    expect([...merged.byHash]).toEqual([
+      ["h1", "Team 1"],
+      ["h2", "Team 2"],
+      ["h3", "Team 2"],
+    ]);
+    expect(merged.problems).toEqual(["from allocation"]);
+  });
+
+  it("keeps allocation-only students, who were never provisioned", () => {
+    const allocation: Membership = { byHash: new Map([["h9", "Team 3"]]), problems: [] };
+    const merged = mergeMembership(allocation, membershipFromDirectory({ teams: [] }));
+    expect(merged.byHash.get("h9")).toBe("Team 3");
   });
 });
