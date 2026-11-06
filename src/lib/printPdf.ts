@@ -14,12 +14,22 @@
 /** Characters no common filesystem accepts, plus control characters. */
 const ILLEGAL_IN_FILENAME = new RegExp("[\\\\/:*?\"<>|\\u0000-\\u001f]", "g");
 
+function pdfName(...parts: string[]): string {
+  return parts
+    .map((part) => part.replace(ILLEGAL_IN_FILENAME, " ").replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+    .join(" - ")
+    .slice(0, 120);
+}
+
 /** A readable, filesystem-safe name for a contract PDF. */
 export function contractPdfName(sessionTitle: string, teamLabel: string): string {
-  const parts = ["Team Contract", sessionTitle, teamLabel]
-    .map((part) => part.replace(ILLEGAL_IN_FILENAME, " ").replace(/\s+/g, " ").trim())
-    .filter(Boolean);
-  return parts.join(" - ").slice(0, 120);
+  return pdfName("Team Contract", sessionTitle, teamLabel);
+}
+
+/** A readable, filesystem-safe name for the instructor's trouble-spots PDF. */
+export function reportPdfName(sessionTitle: string, roundLabel: string): string {
+  return pdfName("Peer Eval Trouble Spots", sessionTitle, roundLabel);
 }
 
 /**

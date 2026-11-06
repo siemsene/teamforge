@@ -8,6 +8,8 @@ import { publicTeamMgmt } from "../teams/contractTemplate";
 import { reconcileBallot, rosterAsSeen, validateSubmittedBallot } from "../../lib/evalValidation";
 import { downloadFile, sessionFilename, toCsv } from "../../lib/util";
 import { buildDetailRows, buildSummaryRows } from "../../lib/evalExport";
+import { buildTroubleReport } from "../../lib/evalConcerns";
+import { TroubleSpots } from "./TroubleSpots";
 import {
   LOW_FACTOR_FLAG,
   MIN_RATERS_FOR_DETAIL,
@@ -262,6 +264,18 @@ export function EvalReview() {
     });
   }, [decrypted, tm.factorFloor, tm.factorCeiling, tm.deadband, tm.damping]);
 
+  const trouble = useMemo(() => {
+    if (!decrypted || !results) return null;
+    return buildTroubleReport({
+      results,
+      teams: decrypted.directory.teams,
+      byRater: decrypted.byRater,
+      nicknames: decrypted.nicknames,
+      includeBehaviors: tm.includeBehaviors,
+      behaviors: tm.behaviors,
+    });
+  }, [decrypted, results, tm.includeBehaviors, tm.behaviors]);
+
   function exportCsv() {
     if (!decrypted || !results) return;
     const { nicknames, directory, byRater } = decrypted;
@@ -507,6 +521,13 @@ export function EvalReview() {
                     ))}
                   </ul>
                 </div>
+              )}
+              {trouble && (
+                <TroubleSpots
+                  report={trouble}
+                  sessionTitle={session.title}
+                  roundLabel={round === "formative" ? "Practice round" : "Graded round"}
+                />
               )}
               <FactorTable results={results} nicknames={decrypted.nicknames} />
             </>

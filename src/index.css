@@ -6,7 +6,8 @@ body {
 
 /* Printable contracts: hidden on screen, and the only thing shown when
  * printing (so "Download PDF" via window.print() yields a clean document). */
-.contract-print {
+.contract-print,
+.print-only {
   display: none;
 }
 @media print {
@@ -14,10 +15,13 @@ body {
     visibility: hidden;
   }
   .contract-print,
-  .contract-print * {
+  .contract-print *,
+  .print-only,
+  .print-only * {
     visibility: visible;
   }
-  .contract-print {
+  .contract-print,
+  .print-only {
     display: block;
     position: absolute;
     inset: 0;
