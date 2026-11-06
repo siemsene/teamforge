@@ -193,6 +193,36 @@ export function validateSubmittedBallot(
 }
 
 /**
+ * The teammates a ballot should be validated against: the roster the rater had
+ * in front of them when they submitted.
+ *
+ * `teammates` are the rater's teammates per the directory, and every one of them
+ * must be rated. `departed` are indexes the rater *may* have seen but who have
+ * since left — moved to another team (`formerCodeIndexes`) or removed from the
+ * session (`retiredCodeIndexes`). Whether the rater saw them depends on when
+ * they submitted, and the only record of that is the ballot itself, so a
+ * departed index counts exactly when the ballot names it.
+ *
+ * Requiring them instead is what broke every ballot in a section once anyone
+ * was removed: `retiredCodeIndexes` is session-wide, so each rater was asked
+ * for points for every removed student in the course, on teams they were never
+ * on. Naming someone who has departed cannot inflate anything —
+ * reconcileBallot drops those shares before scoring.
+ */
+export function rosterAsSeen(
+  points: Record<string, number> | undefined,
+  teammates: number[],
+  departed: Iterable<number>,
+): number[] {
+  const named = new Set(Object.keys(points ?? {}));
+  const out = [...teammates];
+  for (const idx of departed) {
+    if (named.has(String(idx)) && !out.includes(idx)) out.push(idx);
+  }
+  return out;
+}
+
+/**
  * A ballot restricted to the teammates who are still on the team.
  *
  * A student can leave mid-round. Their teammates' ballots were written against

@@ -5,7 +5,7 @@ import { eciesDecrypt, fromBase64 } from "../../lib/crypto";
 import { importMemberKey, sealEnvelope } from "../../lib/memberKey";
 import { openDirectoryNicknames } from "../../lib/nicknames";
 import { publicTeamMgmt } from "../teams/contractTemplate";
-import { reconcileBallot, validateSubmittedBallot } from "../../lib/evalValidation";
+import { reconcileBallot, rosterAsSeen, validateSubmittedBallot } from "../../lib/evalValidation";
 import { downloadFile, sessionFilename, toCsv } from "../../lib/util";
 import { buildDetailRows, buildSummaryRows } from "../../lib/evalExport";
 import {
@@ -113,22 +113,26 @@ export function EvalReview() {
       // Who each rater's ballot is allowed to talk about, from the roster we
       // hold — never from anything the ballot asserts about itself.
       //
-      // Validation uses the roster as provisioned, plus any index retired since
-      // and anyone moved off this team since, because that is what the student
-      // had in front of them. Judging a ballot against a roster that changed
-      // after they submitted it would reject an honest answer for our
-      // bookkeeping. Reconciliation to the survivors happens after, never
-      // before — renormalizing first would make the justification rule fire on
-      // numbers the student never typed.
-      const retired = new Set(session.retiredCodeIndexes ?? []);
-      const expectedByHash = new Map<string, { raterCodeIndex: number; teammateCodeIndexes: number[]; teamLabel: string }>();
+      // Validation uses the roster as provisioned, plus whichever departed
+      // students (retired from the session, or moved off this team) the ballot
+      // names, because that is what the student had in front of them. Judging a
+      // ballot against a roster that changed after they submitted it would
+      // reject an honest answer for our bookkeeping. Reconciliation to the
+      // survivors happens after, never before — renormalizing first would make
+      // the justification rule fire on numbers the student never typed.
+      const retired = session.retiredCodeIndexes ?? [];
+      const expectedByHash = new Map<
+        string,
+        { raterCodeIndex: number; teammateCodeIndexes: number[]; departed: number[]; teamLabel: string }
+      >();
       for (const team of directory.teams) {
         for (const m of team.members) {
           const known = team.members.filter((o) => o.codeIndex !== m.codeIndex).map((o) => o.codeIndex);
           expectedByHash.set(m.codeHash, {
             raterCodeIndex: m.codeIndex,
             teamLabel: team.label,
-            teammateCodeIndexes: [...new Set([...known, ...retired, ...(team.formerCodeIndexes ?? [])])],
+            teammateCodeIndexes: known,
+            departed: [...retired, ...(team.formerCodeIndexes ?? [])].filter((i) => i !== m.codeIndex),
           });
         }
       }
@@ -170,7 +174,14 @@ export function EvalReview() {
         // can never see inside it. Anything that fails here is excluded rather
         // than scored, which leaves the rater imputed at an even split — the
         // same neutral treatment a teammate who never submitted receives.
-        const reasons = validateSubmittedBallot(answers, expected, validationConfig);
+        const reasons = validateSubmittedBallot(
+          answers,
+          {
+            ...expected,
+            teammateCodeIndexes: rosterAsSeen(answers.points, expected.teammateCodeIndexes, expected.departed),
+          },
+          validationConfig,
+        );
         if (reasons.length > 0) {
           rejected.push({ raterCodeIndex: s.codeIndex, teamLabel: expected.teamLabel, reasons });
           continue;

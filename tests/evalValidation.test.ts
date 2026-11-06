@@ -6,6 +6,7 @@ import {
   neutralRange,
   pruneJustifications,
   reconcileBallot,
+  rosterAsSeen,
   validatePeerEval,
   validateSubmittedBallot,
 } from "../src/lib/evalValidation";
@@ -74,6 +75,28 @@ describe("validatePeerEval", () => {
     const reconciled = reconcileBallot(ballot, [2, 3, 4]);
     expect(reconciled.dropped).toEqual([{ codeIndex: 5, points: 25 }]);
     expect(reconciled.answers.points).toEqual({ "2": 100 / 3, "3": 100 / 3, "4": 100 / 3 });
+  });
+
+  it("does not demand points for students removed from the session elsewhere", () => {
+    // retiredCodeIndexes is session-wide. Requiring every retired index on
+    // every ballot rejected an entire section once six students were dropped.
+    const ballot = answers({ points: { "2": 25, "3": 25, "4": 25, "5": 25 } });
+    const retired = [1, 15, 16, 23, 40];
+    const roster = rosterAsSeen(ballot.points, teammates, retired);
+    expect(roster).toEqual(teammates);
+    expect(validatePeerEval(ballot, roster, CONFIG)).toEqual([]);
+  });
+
+  it("still accepts a ballot that names a departed teammate it was written against", () => {
+    const ballot = answers({ points: { "2": 25, "3": 25, "4": 25, "9": 25 } });
+    const roster = rosterAsSeen(ballot.points, [2, 3, 4], [9, 40]);
+    expect(roster).toEqual([2, 3, 4, 9]);
+    expect(validatePeerEval(ballot, roster, CONFIG)).toEqual([]);
+    // But a current teammate can never be left out.
+    const partial = answers({ points: { "2": 50, "3": 50 } });
+    expect(validatePeerEval(partial, rosterAsSeen(partial.points, [2, 3, 4], [9]), CONFIG).join(" ")).toMatch(
+      /Missing a point allocation for teammate #4/,
+    );
   });
 
   it("rejects totals that are not 100", () => {
